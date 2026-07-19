@@ -15,7 +15,7 @@ let achtung = {
     gameEnded: true, // are noone alive?
     winner: false, // do we have a winner?
     sides: 0, // can all players go out of screen and come out the other side
-    clearSides: 0, // to clear timeone if leftover time from last round
+    clearSides: [], // to clear timeouts if leftover time from last round
     playing: [], // who's playing
     powerups: [
         "g_slow",
@@ -102,7 +102,8 @@ function newSize() {
 
 function init() {
     achtung.powerupsOnScreen = [] // clear powerups on screen
-    clearTimeout(achtung.clearSides) // clear timeout if sides powerup leftover time from last round
+    for (let i = 0; i < achtung.clearSides.length; i++) clearTimeout(achtung.clearSides[i]) // clear timeouts if sides powerup leftover time from last round
+    achtung.clearSides = []
     achtung.sides = 0 // reset sides
 
     for (const player in players) {
@@ -372,26 +373,29 @@ function draw() {
 
         // check for player inside playing field
         if (achtung.sides != 0 || players[player].powerup.side != 0) {
-            // player has side powerup of achtung.sides, players can move out of canvas
+            // player has side powerup or achtung.sides, players can move out of canvas.
+            // shift ALL reference points by the same offset so the trail continues seamlessly
+            // on the other side; hard-setting only one coordinate drew a perpendicular blob
+            // of trail on the entry edge which instantly killed the wrapping player (issue #2)
             if (players[player].x < 0) {
-                players[player].x = h
-                prevPosX = h
-                prevprevPosX = h
+                players[player].x += h
+                prevPosX += h
+                prevprevPosX += h
             }
             if (players[player].x > h) {
-                players[player].x = 0
-                prevPosX = 0
-                prevprevPosX = 0
+                players[player].x -= h
+                prevPosX -= h
+                prevprevPosX -= h
             }
             if (players[player].y < 0) {
-                players[player].y = h
-                prevPosY = h
-                prevprevPosY = h
+                players[player].y += h
+                prevPosY += h
+                prevprevPosY += h
             }
             if (players[player].y > h) {
-                players[player].y = 0
-                prevPosY = 0
-                prevprevPosY = 0
+                players[player].y -= h
+                prevPosY -= h
+                prevprevPosY -= h
             }
         } else {
             if (
@@ -437,8 +441,13 @@ function draw() {
         }
 
         // check collision
-        const pxFront = Math.round(players[player].x + mathCos(players[player].dir) * hitboxSize * players[player].powerup.size)
-        const pyFront = Math.round(players[player].y + mathSin(players[player].dir) * hitboxSize * players[player].powerup.size)
+        // the robot trail is drawn with lineCap "round", so it sticks out lineWidth/2 past the
+        // player position - that leaves the front sample less than 1px of clearance and rounding
+        // makes it randomly hit the carrier's own fresh trail. add 2px clearance while robot is
+        // active so the square powerup can't kill its own carrier (issue #1)
+        const frontDist = hitboxSize * players[player].powerup.size + (players[player].powerup.robot != 0 ? 2 : 0)
+        const pxFront = Math.round(players[player].x + mathCos(players[player].dir) * frontDist)
+        const pyFront = Math.round(players[player].y + mathSin(players[player].dir) * frontDist)
         const pxFront2 = Math.round(players[player].x + mathCos(players[player].dir))
         const pyFront2 = Math.round(players[player].y + mathSin(players[player].dir))
         const pxLeft = Math.round(players[player].x + mathCos(players[player].dir - r2d(55)) * hitboxSize * players[player].powerup.size)
@@ -634,33 +643,33 @@ function doPowerups(puPlayer, index) {
     }
     if (powName == "g_slow") {
         players[puPlayer].powerup.speed *= 0.5
-        players[puPlayer].powerup.toClear[index] = setTimeout(() => (players[puPlayer].powerup.speed *= 2), gTimeout)
+        players[puPlayer].powerup.toClear.push(setTimeout(() => (players[puPlayer].powerup.speed *= 2), gTimeout))
     }
     if (powName == "g_fast") {
         players[puPlayer].powerup.speed *= 2
-        players[puPlayer].powerup.toClear[index] = setTimeout(() => (players[puPlayer].powerup.speed *= 0.5), gTimeout)
+        players[puPlayer].powerup.toClear.push(setTimeout(() => (players[puPlayer].powerup.speed *= 0.5), gTimeout))
     }
     if (powName == "g_thin") {
         players[puPlayer].powerup.size *= 0.5
-        players[puPlayer].powerup.toClear[index] = setTimeout(() => (players[puPlayer].powerup.size *= 2), gTimeout)
+        players[puPlayer].powerup.toClear.push(setTimeout(() => (players[puPlayer].powerup.size *= 2), gTimeout))
     }
     if (powName == "g_robot") {
         players[puPlayer].powerup.robot++
-        players[puPlayer].powerup.toClear[index] = setTimeout(() => players[puPlayer].powerup.robot--, gTimeout)
+        players[puPlayer].powerup.toClear.push(setTimeout(() => players[puPlayer].powerup.robot--, gTimeout))
     }
     if (powName == "g_side") {
         players[puPlayer].powerup.side++
-        players[puPlayer].powerup.toClear[index] = setTimeout(() => players[puPlayer].powerup.side--, gTimeout)
+        players[puPlayer].powerup.toClear.push(setTimeout(() => players[puPlayer].powerup.side--, gTimeout))
     }
     if (powName == "g_invisible") {
         players[puPlayer].powerup.invisible++
-        players[puPlayer].powerup.toClear[index] = setTimeout(() => players[puPlayer].powerup.invisible--, gTimeout)
+        players[puPlayer].powerup.toClear.push(setTimeout(() => players[puPlayer].powerup.invisible--, gTimeout))
     }
     if (powName == "r_slow") {
         for (const otherPlayers in players) {
             if (otherPlayers != puPlayer) {
                 players[otherPlayers].powerup.speed *= 0.5
-                players[otherPlayers].powerup.toClear[index] = setTimeout(() => (players[otherPlayers].powerup.speed *= 2), rTimeout)
+                players[otherPlayers].powerup.toClear.push(setTimeout(() => (players[otherPlayers].powerup.speed *= 2), rTimeout))
             }
         }
     }
@@ -668,7 +677,7 @@ function doPowerups(puPlayer, index) {
         for (const otherPlayers in players) {
             if (otherPlayers != puPlayer) {
                 players[otherPlayers].powerup.speed *= 2
-                players[otherPlayers].powerup.toClear[index] = setTimeout(() => (players[otherPlayers].powerup.speed *= 0.5), rTimeout)
+                players[otherPlayers].powerup.toClear.push(setTimeout(() => (players[otherPlayers].powerup.speed *= 0.5), rTimeout))
             }
         }
     }
@@ -676,7 +685,7 @@ function doPowerups(puPlayer, index) {
         for (const otherPlayers in players) {
             if (otherPlayers != puPlayer) {
                 players[otherPlayers].powerup.size *= 2
-                players[otherPlayers].powerup.toClear[index] = setTimeout(() => (players[otherPlayers].powerup.size *= 0.5), rTimeout)
+                players[otherPlayers].powerup.toClear.push(setTimeout(() => (players[otherPlayers].powerup.size *= 0.5), rTimeout))
             }
         }
     }
@@ -684,7 +693,7 @@ function doPowerups(puPlayer, index) {
         for (const otherPlayers in players) {
             if (otherPlayers != puPlayer) {
                 players[otherPlayers].powerup.robot++
-                players[otherPlayers].powerup.toClear[index] = setTimeout(() => players[otherPlayers].powerup.robot--, rTimeout)
+                players[otherPlayers].powerup.toClear.push(setTimeout(() => players[otherPlayers].powerup.robot--, rTimeout))
             }
         }
     }
@@ -692,7 +701,7 @@ function doPowerups(puPlayer, index) {
         for (const otherPlayers in players) {
             if (otherPlayers != puPlayer) {
                 players[otherPlayers].powerup.reverse++
-                players[otherPlayers].powerup.toClear[index] = setTimeout(() => players[otherPlayers].powerup.reverse--, rTimeout)
+                players[otherPlayers].powerup.toClear.push(setTimeout(() => players[otherPlayers].powerup.reverse--, rTimeout))
             }
         }
     }
@@ -706,7 +715,7 @@ function doPowerups(puPlayer, index) {
     }
     if (powName == "b_sides") {
         achtung.sides++
-        achtung.clearSides = setTimeout(() => achtung.sides--, gTimeout)
+        achtung.clearSides.push(setTimeout(() => achtung.sides--, gTimeout))
     }
 }
 
