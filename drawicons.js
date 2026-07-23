@@ -1,4 +1,4 @@
-const drawPowerupIcons = (icon) => {
+const drawPowerupIcons = (icon, ctx = ctxPV, size = iconSize, fillColor = yellow) => {
     let pathClear = new Path2D("M843.7,843.7H236.4V236.3c147.4,0,372.9,0,607.3,0V843.7z M269.6,810.4h540.8V269.6H269.6L269.6,810.4 L269.6,810.4z")
     let pathFast = new Path2D("M392.3,169.4c143.2,19.4,281.7,37.7,405,52.6L581.6,435.8l278.2,9l-460.5,569.4l126.2-410.2l-252.4-12.3 L392.3,169.4z")
     let pathInvisible1 = new Path2D(
@@ -49,6 +49,42 @@ const drawPowerupIcons = (icon) => {
     let pathSides10 = new Path2D("M777.2,236.3v33.2h33.2v33.2h33.2v-66.5C821.5,235.9,799.3,235.9,777.2,236.3z")
     let pathSides11 = new Path2D("M810.4,397.7h33.2c0,52,0,75.3,0,94.9h-33.2V397.7z")
     let pathSides12 = new Path2D("M810.4,587.4h33.2c-0.1,36.2-0.1,67.8,0,94.9h-33.2V587.4z")
+    let pathSine = (() => {
+        // build a constant-thickness ribbon that traces a sine wave, since (unlike the other
+        // icons) there's no hand-authored illustrator path for this shape
+        const cx = 540,
+            cy = 540,
+            halfWidth = 380,
+            amplitude = 200,
+            cycles = 1.25,
+            thickness = 90,
+            steps = 48
+
+        const curve = (t) => [cx - halfWidth + t * halfWidth * 2, cy - Math.sin(t * cycles * Math.PI * 2) * amplitude]
+        const normal = (t) => {
+            const dydt = -Math.cos(t * cycles * Math.PI * 2) * amplitude * cycles * Math.PI * 2
+            const dxdt = halfWidth * 2
+            const len = Math.hypot(dxdt, dydt)
+            return [-dydt / len, dxdt / len]
+        }
+
+        const top = [],
+            bottom = []
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps
+            const [x, y] = curve(t)
+            const [nx, ny] = normal(t)
+            top.push([x + (nx * thickness) / 2, y + (ny * thickness) / 2])
+            bottom.push([x - (nx * thickness) / 2, y - (ny * thickness) / 2])
+        }
+
+        const path = new Path2D()
+        path.moveTo(top[0][0], top[0][1])
+        for (let i = 1; i < top.length; i++) path.lineTo(top[i][0], top[i][1])
+        for (let i = bottom.length - 1; i >= 0; i--) path.lineTo(bottom[i][0], bottom[i][1])
+        path.closePath()
+        return path
+    })()
     let pathSlow1 = new Path2D(
         "M595.2,758.5l6.2,72l-286.7,24.8l-5.3-61.5l158.2-250.4L289,558.8l-6.2-72c112-9.7,232.6-20.1,281.8-24.3 l5.3,61.5L413.5,774.2L595.2,758.5z"
     )
@@ -59,14 +95,104 @@ const drawPowerupIcons = (icon) => {
     let pathThick = new Path2D("M806.8,190l-104.6-55.2C476.2,318,325.5,565.2,273.1,890l104.6,55.2C606.2,765,750.2,514.1,806.8,190 L806.8,190z")
     let pathThin = new Path2D("M377.8,945.1C475.6,686.6,615.1,433.9,806.8,190l-104.6-55.1C602,392.1,462,644,273.1,890L377.8,945.1z")
 
+    // -- programmatisch gebaute Icons (keine Illustrator-Vorlage vorhanden) --
+    let pathGhost = (() => {
+        const path = new Path2D()
+        const cx = 540,
+            halfW = 250,
+            domeY = 470,
+            bottomY = 830,
+            r = 250
+        path.moveTo(cx - halfW, bottomY)
+        path.lineTo(cx - halfW, domeY)
+        path.arc(cx, domeY, r, Math.PI, 0, false)
+        path.lineTo(cx + halfW, bottomY)
+        const waveW = (halfW * 2) / 3
+        for (let i = 0; i < 3; i++) {
+            const x0 = cx + halfW - i * waveW
+            const xMid = x0 - waveW / 2
+            const x1 = x0 - waveW
+            path.quadraticCurveTo(xMid, bottomY - 90, x1, bottomY)
+        }
+        path.closePath()
+        return path
+    })()
+
+    let pathFreeze = (() => {
+        const path = new Path2D()
+        const cx = 540,
+            cy = 540,
+            armLen = 320,
+            armHalfW = 38
+        for (let i = 0; i < 3; i++) {
+            const angle = (Math.PI / 3) * i
+            const dx = Math.cos(angle),
+                dy = Math.sin(angle)
+            const px = -dy,
+                py = dx
+            path.moveTo(cx - dx * armLen + px * armHalfW, cy - dy * armLen + py * armHalfW)
+            path.lineTo(cx + dx * armLen + px * armHalfW, cy + dy * armLen + py * armHalfW)
+            path.lineTo(cx + dx * armLen - px * armHalfW, cy + dy * armLen - py * armHalfW)
+            path.lineTo(cx - dx * armLen - px * armHalfW, cy - dy * armLen - py * armHalfW)
+            path.closePath()
+        }
+        return path
+    })()
+
+    let pathSwap1 = new Path2D("M250,375 L680,375 L680,310 L830,420 L680,530 L680,465 L250,465 Z")
+    let pathSwap2 = new Path2D("M830,615 L400,615 L400,550 L250,660 L400,770 L400,705 L830,705 Z")
+
+    const buildCornerArrows = (pointInward) => {
+        const path = new Path2D()
+        const cx = 540,
+            cy = 540,
+            gap = 90,
+            headLen = 130,
+            shaftLen = 220,
+            shaftHalfW = 34,
+            headHalfW = 85
+        for (let i = 0; i < 4; i++) {
+            const angle = Math.PI / 4 + i * (Math.PI / 2)
+            const dx = Math.cos(angle),
+                dy = Math.sin(angle)
+            const px = -dy,
+                py = dx
+            const dTip = pointInward ? gap : gap + shaftLen + headLen
+            const dHeadBase = pointInward ? gap + headLen : gap + shaftLen
+            const dShaftFar = pointInward ? gap + headLen + shaftLen : gap
+            const pt = (d) => [cx + dx * d, cy + dy * d]
+            const [tipX, tipY] = pt(dTip)
+            const [hbX, hbY] = pt(dHeadBase)
+            const [sfX, sfY] = pt(dShaftFar)
+
+            path.moveTo(hbX + px * shaftHalfW, hbY + py * shaftHalfW)
+            path.lineTo(sfX + px * shaftHalfW, sfY + py * shaftHalfW)
+            path.lineTo(sfX - px * shaftHalfW, sfY - py * shaftHalfW)
+            path.lineTo(hbX - px * shaftHalfW, hbY - py * shaftHalfW)
+            path.closePath()
+
+            path.moveTo(hbX + px * headHalfW, hbY + py * headHalfW)
+            path.lineTo(tipX, tipY)
+            path.lineTo(hbX - px * headHalfW, hbY - py * headHalfW)
+            path.closePath()
+        }
+        return path
+    }
+    let pathShrink = buildCornerArrows(true)
+    let pathGrow = buildCornerArrows(false)
+
     let iconPaths = {
         clear: [pathClear],
         fast: [pathFast],
+        freeze: [pathFreeze],
+        ghost: [pathGhost],
+        grow: [pathGrow],
         invisible: [pathInvisible1, pathInvisible2],
         more: [pathMore1, pathMore2, pathMore3],
         random: [pathRandom1, pathRandom2, pathRandom3],
         reverse: [pathReverse1, pathReverse2],
         robot: [pathRobot],
+        shrink: [pathShrink],
         side: [pathSide],
         sides: [
             pathSides1,
@@ -82,26 +208,101 @@ const drawPowerupIcons = (icon) => {
             pathSides11,
             pathSides12,
         ],
+        sine: [pathSine],
         slow: [pathSlow1, pathSlow2, pathSlow3],
+        swap: [pathSwap1, pathSwap2],
         thick: [pathThick],
         thin: [pathThin],
     }
 
-    let scaleFac = 1080 / iconSize
+    let scaleFac = 1080 / size
 
     for (const path in iconPaths) {
         if (!(path == icon)) {
             continue
         } else {
             for (let i = 0; i < iconPaths[icon].length; i++) {
-                ctxPV.save()
-                ctxPV.translate(-iconSize, -iconSize)
-                ctxPV.scale(2 / scaleFac, 2 / scaleFac)
-                ctxPV.fillStyle = yellow
-                if (path == "invisible" && i == 0) ctxPV.fillStyle = "#000000"
-                ctxPV.fill(iconPaths[icon][i])
-                ctxPV.restore()
+                ctx.save()
+                ctx.translate(-size, -size)
+                ctx.scale(2 / scaleFac, 2 / scaleFac)
+                ctx.fillStyle = fillColor
+                if (path == "invisible" && i == 0) ctx.fillStyle = "#000000"
+                ctx.fill(iconPaths[icon][i])
+                ctx.restore()
             }
         }
     }
+}
+
+// zeichnet den farbigen Kreis-Hintergrund + das Icon fuer ein Powerup, zentriert auf (0,0)
+// des aktuellen ctx-Transforms - genutzt sowohl im Spiel (powerupDraw) als auch im Menue
+function drawPowerupBadge(ctx, pow, size) {
+    const greenGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, size)
+    greenGrad.addColorStop(0, green)
+    greenGrad.addColorStop(1, greent)
+    const redGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, size)
+    redGrad.addColorStop(0, red)
+    redGrad.addColorStop(1, redt)
+    const blueGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, size)
+    blueGrad.addColorStop(0, blue)
+    blueGrad.addColorStop(1, bluet)
+
+    ctx.fillStyle = "#000000"
+    ctx.beginPath()
+    ctx.arc(0, 0, size, 0, r2d(360), false)
+    ctx.fill()
+
+    if (pow.charAt(0) == "g") {
+        ctx.strokeStyle = green
+        ctx.fillStyle = greenGrad
+    }
+    if (pow.charAt(0) == "r") {
+        ctx.strokeStyle = red
+        ctx.fillStyle = redGrad
+    }
+    if (pow.charAt(0) == "b") {
+        ctx.strokeStyle = blue
+        ctx.fillStyle = blueGrad
+    }
+    if (pow.charAt(0) == "g" || pow.charAt(0) == "r" || pow.charAt(0) == "b") {
+        ctx.beginPath()
+        ctx.arc(0, 0, size, 0, r2d(360), false)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.arc(0, 0, size, 0, r2d(360), false)
+        ctx.fill()
+    } else {
+        ctx.strokeStyle = blue
+        ctx.beginPath()
+        ctx.arc(0, 0, size, 0, r2d(360), false)
+        ctx.stroke()
+
+        const line1 = [-65, -200]
+        const line2 = [-15, -250]
+
+        ctx.beginPath()
+        ctx.fillStyle = blueGrad
+        ctx.arc(0, 0, size, r2d(line1[0]), r2d(line1[1]), true)
+        ctx.moveTo(Math.cos(r2d(line1[1])) * size, Math.sin(r2d(line1[1])) * size)
+        ctx.lineTo(Math.cos(r2d(line1[0])) * size, Math.sin(r2d(line1[0])) * size)
+        ctx.fill()
+
+        ctx.beginPath()
+        ctx.fillStyle = redGrad
+        ctx.arc(0, 0, size, r2d(line2[0]), r2d(line1[0]), true)
+        ctx.moveTo(Math.cos(r2d(line1[0])) * size, Math.sin(r2d(line1[0])) * size)
+        ctx.lineTo(Math.cos(r2d(line1[1])) * size, Math.sin(r2d(line1[1])) * size)
+        ctx.arc(0, 0, size, r2d(line1[1]), r2d(line2[1]), true)
+        ctx.lineTo(Math.cos(r2d(line2[0])) * size, Math.sin(r2d(line2[0])) * size)
+        ctx.fill()
+
+        ctx.beginPath()
+        ctx.fillStyle = greenGrad
+        ctx.arc(0, 0, size, r2d(line2[1]), r2d(line2[0]), true)
+        ctx.moveTo(Math.cos(r2d(line2[0])) * size, Math.sin(r2d(line2[0])) * size)
+        ctx.lineTo(Math.cos(r2d(line2[1])) * size, Math.sin(r2d(line2[1])) * size)
+        ctx.fill()
+    }
+
+    drawPowerupIcons(pow.slice(2), ctx, size, yellow)
 }

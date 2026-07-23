@@ -6,6 +6,10 @@ function buildStartPage() {
     startH1.textContent = "Achtung, die Kurve!"
     startPage.append(startH1)
 
+    // holds everything except the title, so the Menü button can swap this out for #powerup_page
+    const mainView = document.createElement("div")
+    mainView.id = "start_main_view"
+
     const playerGrid = document.createElement("div")
     playerGrid.id = "player_grid"
 
@@ -58,7 +62,7 @@ function buildStartPage() {
         playerGrid.append(pWrap)
     }
 
-    startPage.append(playerGrid)
+    mainView.append(playerGrid)
 
     const gmWrap = document.createElement("div")
     gmWrap.id = "gamemode_wrapper"
@@ -69,7 +73,13 @@ function buildStartPage() {
     pClassic.textContent = "Classic"
     gmWrap.append(pArcade)
     gmWrap.append(pClassic)
-    startPage.append(gmWrap)
+
+    const menuButton = document.createElement("button")
+    menuButton.id = "powerup_menu_button"
+    menuButton.textContent = "Menü"
+    gmWrap.append(menuButton)
+
+    mainView.append(gmWrap)
 
     const playButtonWrapper = document.createElement("div")
     playButtonWrapper.id = "start_game_button_wrapper"
@@ -77,8 +87,10 @@ function buildStartPage() {
     playButton.id = "start_game_button"
     playButton.textContent = "Press SPACE to start game"
     playButtonWrapper.append(playButton)
-    startPage.append(playButtonWrapper)
+    mainView.append(playButtonWrapper)
     playButton.addEventListener("click", pressSpace)
+
+    startPage.append(mainView)
 }
 
 buildStartPage()

@@ -182,6 +182,126 @@ canvas {
     margin: 10px;
 }
 
+#powerup_menu_button {
+    background-color: #6d6d6d;
+    border: 2px solid #ffffff;
+    color: #ffffff;
+    font-family: "Sarabun", sans-serif;
+    font-size: 18px;
+    padding: 6px 16px;
+    margin: 10px;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+#powerup_menu_button:hover {
+    background-color: #999999;
+}
+
+#start_main_view.hidden,
+#powerup_page.hidden {
+    display: none;
+}
+
+#powerup_page {
+    /* absolute + its own scroll so the (potentially long) list can never grow #start_page itself -
+       #start_page's height is derived from aspect-ratio, and letting this content sit in normal
+       flow made that height (and therefore the whole 4:3 box) balloon to fit the list */
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    padding-top: 130px;
+}
+
+#powerup_back_button {
+    display: block;
+    background-color: #6d6d6d;
+    border: 2px solid #ffffff;
+    color: #ffffff;
+    font-family: "Sarabun", sans-serif;
+    font-size: 18px;
+    padding: 6px 16px;
+    margin: 20px auto;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+#powerup_back_button:hover {
+    background-color: #999999;
+}
+
+#powerup_list {
+    width: 100%;
+    margin: 0 100px 20px;
+}
+
+.powerup_row_start,
+.powerup_row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 12% 58% 30%;
+    align-items: center;
+    margin: 0;
+    background-color: #000;
+    border: none;
+    text-align: left;
+}
+
+.powerup_row_start p {
+    color: #fff;
+    opacity: 1;
+    font-size: 26px;
+    line-height: 1.7;
+}
+
+.powerup_row {
+    opacity: 0.85;
+}
+
+.powerup_row:hover {
+    opacity: 1;
+}
+
+.powerup_row p {
+    color: #fff;
+    font-size: 22px;
+    line-height: 1.6;
+}
+
+.powerup_row canvas {
+    /* overrides the global "canvas" rule (width:100%; aspect-ratio:4/3) meant for the game canvases */
+    position: static;
+    width: 44px;
+    height: 44px;
+    aspect-ratio: unset;
+    cursor: default;
+    display: block;
+}
+
+.powerup_row input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.powerup_group_heading {
+    color: #fff;
+    font-size: 20px;
+    margin: 18px 0 4px 0;
+}
+
+.powerup_group_heading.powerup_group_self {
+    color: var(--greenlee);
+}
+
+.powerup_group_heading.powerup_group_enemy {
+    color: var(--fred);
+}
+
+.powerup_group_heading.powerup_group_global {
+    color: var(--blue);
+}
+
 #start_game_button_wrapper {
     display: flex;
     justify-content: center;

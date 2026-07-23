@@ -16,6 +16,8 @@ let achtung = {
     winner: false, // do we have a winner?
     sides: 0, // can all players go out of screen and come out the other side
     clearSides: [], // to clear timeouts if leftover time from last round
+    fieldInset: 0, // extra px inset from the border on all sides (b_shrink/b_grow), can go negative
+    clearInset: [], // to clear fieldInset timeouts if leftover time from last round
     playing: [], // who's playing
     powerups: [
         "g_slow",
@@ -24,14 +26,21 @@ let achtung = {
         "g_robot",
         "g_side",
         "g_invisible",
+        "g_sine",
+        "g_ghost",
         "r_slow",
         "r_fast",
         "r_thick",
         "r_robot",
         "r_reverse",
+        "r_sine",
+        "r_swap",
+        "r_freeze",
         "b_clear",
         "b_more",
         "b_sides",
+        "b_shrink",
+        "b_grow",
         "o_random",
     ],
     powerupsOnScreen: [], // what powerups are on screen now
@@ -61,6 +70,7 @@ let canvasID,
     bridgeProb = 0.005, // in percent
     bridgeSize = 10, // in frames
     turnSpeed = 0.06, // in radians per frame
+    sineTurnDuration = 240, // in frames; duration of g_sine/r_sine steering-intensity wave (4s @ 60 steps/sec)
     w,
     h,
     w100th,
@@ -105,6 +115,9 @@ function init() {
     for (let i = 0; i < achtung.clearSides.length; i++) clearTimeout(achtung.clearSides[i]) // clear timeouts if sides powerup leftover time from last round
     achtung.clearSides = []
     achtung.sides = 0 // reset sides
+    for (let i = 0; i < achtung.clearInset.length; i++) clearTimeout(achtung.clearInset[i]) // clear timeouts if shrink/grow leftover time from last round
+    achtung.clearInset = []
+    achtung.fieldInset = 0 // reset field size
 
     for (const player in players) {
         // clear timeout if powerup leftover time from last round
@@ -119,6 +132,8 @@ function init() {
         players[player].turnL = false
         players[player].turnR = false
         players[player].color = getComputedStyle(document.documentElement).getPropertyValue(`--${player}`) // colors from css :root object
+        const rgbMatch = players[player].color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i)
+        players[player].colorRGB = rgbMatch ? [+rgbMatch[1], +rgbMatch[2], +rgbMatch[3]] : [255, 255, 0] // for g_ghost's own-trail check
         players[player].alive = true
         players[player].winner = false
         players[player].bridge = false
@@ -130,8 +145,11 @@ function init() {
         players[player].powerup.speed = 1
         players[player].powerup.invisible = 0
         players[player].powerup.side = 0
+        players[player].powerup.ghost = 0
+        players[player].powerup.freeze = 0
         players[player].powerup.powerupArray = []
         players[player].powerup.toClear = [] // to clear timeout at the end of rounds if leftover time
+        players[player].powerup.sineStart = null // frame the sine steering wave started, null if inactive
     }
 
     // clear everything
@@ -196,6 +214,8 @@ document.addEventListener("keypress", (e) => {
 })
 
 function pressSpace() {
+    if (achtung.startScreen) applyBotSelection() // fill any unclaimed slots with bots per the checkbox/count
+
     let playingC = 0
     for (const player in players) {
         if (players[player].ready) playingC++
@@ -276,8 +296,24 @@ function drawStart() {
 }
 
 // main loop
-function draw() {
+// the game logic is tuned for 60 steps per second, but requestAnimationFrame fires at the
+// display refresh rate (60/120/144 Hz...) - on fast monitors the whole game ran up to 2.4x
+// too fast. accumulate real time and only advance the simulation at 60 steps per second
+let lastFrameTime = 0,
+    frameAcc = 0
+const frameStep = 1000 / 60
+
+function draw(now = performance.now()) {
     canvasID = window.requestAnimationFrame(draw) // to pause: cancelAnimationFrame(CanvasID)
+
+    let dt = now - lastFrameTime
+    lastFrameTime = now
+    if (dt < 0 || dt > 100) dt = frameStep // first frame, or resuming after pause/tab switch
+    frameAcc += dt
+    if (frameAcc < frameStep) return // display is faster than 60 Hz; wait for the next frame
+    frameAcc -= frameStep
+    if (frameAcc > frameStep) frameAcc = frameStep // slow machine; don't pile up debt
+
     tFrame++ // increment tFrame
 
     // clear
@@ -286,13 +322,14 @@ function draw() {
     ctxDO.fillStyle = "#000000"
     ctxDO.fillRect(h, 0, w - h, h)
 
-    // draw yellow border
+    // draw yellow border - inset by achtung.fieldInset so b_shrink/b_grow are visible, not just deadly
+    const inset = achtung.fieldInset
     ctxDO.lineWidth = borderWidth
     ctxDO.strokeStyle = "#000000"
-    ctxDO.strokeRect(borderWidth / 2, borderWidth / 2, h - borderWidth, h - borderWidth)
+    ctxDO.strokeRect(borderWidth / 2 + inset, borderWidth / 2 + inset, h - borderWidth - inset * 2, h - borderWidth - inset * 2)
     if (achtung.sides != 0) ctxDO.strokeStyle = `rgba(255, 255, 0, ${Math.abs((tFrame % 40) - 20) / 20})`
     else ctxDO.strokeStyle = yellow // if sides, border flickers
-    ctxDO.strokeRect(borderWidth / 2, borderWidth / 2, h - borderWidth, h - borderWidth)
+    ctxDO.strokeRect(borderWidth / 2 + inset, borderWidth / 2 + inset, h - borderWidth - inset * 2, h - borderWidth - inset * 2)
 
     // spawn new powerup if arcade mode and math.random() < powerup probability
     if (achtung.gamemode == 1) if (Math.random() < powerupProb) powerupSpawner()
@@ -340,28 +377,46 @@ function draw() {
 
         if (!players[player].alive) continue // continue if player not alive (drawing dot is above, so player dot will still be drawn even if dead)
 
+        if (players[player].isBot) botThink(player) // let bot.js set turnL/turnR for this frame
+
         // update player turning
-        if (players[player].powerup.robot == 0) {
-            // if normal
-            if (players[player].turnL) {
-                if (players[player].powerup.reverse == 0) players[player].dir -= turnSpeed / Math.pow(players[player].powerup.size, 0.3)
-                else players[player].dir += turnSpeed / Math.pow(players[player].powerup.size, 0.3)
+        // powerup.sineStart (g_sine/r_sine) scales turn intensity by a sine wave between
+        // 0.5x and 2x over sineTurnDuration frames - it only scales magnitude, never the sign,
+        // so turnL/turnR (and reverse) always steer the same way, keys are never swapped
+        let turnFactor = 1
+        if (players[player].powerup.sineStart !== null) {
+            const sineElapsed = tFrame - players[player].powerup.sineStart
+            if (sineElapsed < sineTurnDuration) {
+                turnFactor = Math.pow(2, Math.sin((sineElapsed / sineTurnDuration) * Math.PI * 2))
+            } else {
+                players[player].powerup.sineStart = null
             }
-            if (players[player].turnR) {
-                if (players[player].powerup.reverse == 0) players[player].dir += turnSpeed / Math.pow(players[player].powerup.size, 0.3)
-                else players[player].dir -= turnSpeed / Math.pow(players[player].powerup.size, 0.3)
-            }
-        } else {
-            // if robot
-            if (players[player].turnL) {
-                players[player].turnL = false
-                if (players[player].powerup.reverse == 0) players[player].dir -= r2d(90)
-                else players[player].dir += r2d(90)
-            }
-            if (players[player].turnR) {
-                players[player].turnR = false
-                if (players[player].powerup.reverse == 0) players[player].dir += r2d(90)
-                else players[player].dir -= r2d(90)
+        }
+
+        if (players[player].powerup.freeze == 0) {
+            // r_freeze blocks steering entirely for its duration - held keys just resume once it ends
+            if (players[player].powerup.robot == 0) {
+                // if normal
+                if (players[player].turnL) {
+                    if (players[player].powerup.reverse == 0) players[player].dir -= (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+                    else players[player].dir += (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+                }
+                if (players[player].turnR) {
+                    if (players[player].powerup.reverse == 0) players[player].dir += (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+                    else players[player].dir -= (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+                }
+            } else {
+                // if robot
+                if (players[player].turnL) {
+                    players[player].turnL = false
+                    if (players[player].powerup.reverse == 0) players[player].dir -= r2d(90) * turnFactor
+                    else players[player].dir += r2d(90) * turnFactor
+                }
+                if (players[player].turnR) {
+                    players[player].turnR = false
+                    if (players[player].powerup.reverse == 0) players[player].dir += r2d(90) * turnFactor
+                    else players[player].dir -= r2d(90) * turnFactor
+                }
             }
         }
 
@@ -399,11 +454,11 @@ function draw() {
             }
         } else {
             if (
-                // if not, player dead
-                players[player].x < borderWidth + hitboxSize ||
-                players[player].x > h - borderWidth - hitboxSize ||
-                players[player].y < borderWidth + hitboxSize ||
-                players[player].y > h - borderWidth - hitboxSize
+                // if not, player dead - achtung.fieldInset (b_shrink/b_grow) moves this boundary for everyone
+                players[player].x < borderWidth + hitboxSize + achtung.fieldInset ||
+                players[player].x > h - borderWidth - hitboxSize - achtung.fieldInset ||
+                players[player].y < borderWidth + hitboxSize + achtung.fieldInset ||
+                players[player].y > h - borderWidth - hitboxSize - achtung.fieldInset
             ) {
                 givePoints(players[player])
                 continue
@@ -496,14 +551,23 @@ function draw() {
             // don't check collision if making bridge
             if (players[player].powerup.invisible == 0) {
                 // don't check if invisible
+                // g_ghost: a trail pixel only counts as a hit if it's NOT this player's own color -
+                // still dies to walls and everyone else's trail, just not their own
+                const own = players[player].colorRGB
+                const isOwnTrail = (d) => players[player].powerup.ghost != 0 && d[3] == 255 && d[0] == own[0] && d[1] == own[1] && d[2] == own[2]
                 if (players[player].powerup.robot == 0) {
                     // check alpha value of pixels front, front2, left, right
-                    if (imgDataFrontTH[3] == 255 || imgDataFront2TH[3] == 255 || imgDataLeftTH[3] == 255 || imgDataRightTH[3] == 255) {
+                    if (
+                        (imgDataFrontTH[3] == 255 && !isOwnTrail(imgDataFrontTH)) ||
+                        (imgDataFront2TH[3] == 255 && !isOwnTrail(imgDataFront2TH)) ||
+                        (imgDataLeftTH[3] == 255 && !isOwnTrail(imgDataLeftTH)) ||
+                        (imgDataRightTH[3] == 255 && !isOwnTrail(imgDataRightTH))
+                    ) {
                         givePoints(players[player])
                         continue
                     }
                 } else {
-                    if (imgDataFrontTH[3] == 255) {
+                    if (imgDataFrontTH[3] == 255 && !isOwnTrail(imgDataFrontTH)) {
                         // if robot only check alpha value of front
                         givePoints(players[player])
                         continue
@@ -635,11 +699,13 @@ const drawGameUI = () => {
 function doPowerups(puPlayer, index) {
     let gTimeout = 8000
     let rTimeout = 5000
+    let freezeTimeout = 1000 // r_freeze is stronger than r_reverse, so it stays much shorter
     let powName = players[puPlayer].powerup.powerupArray[index]
 
     // powerup starts
     if (powName == "o_random") {
-        powName = achtung.powerups[Math.floor(Math.random() * achtung.powerups.length)]
+        const pool = achtung.powerups.filter((p) => achtung.enabledPowerups.has(p) && p != "o_random")
+        if (pool.length) powName = pool[Math.floor(Math.random() * pool.length)]
     }
     if (powName == "g_slow") {
         players[puPlayer].powerup.speed *= 0.5
@@ -664,6 +730,13 @@ function doPowerups(puPlayer, index) {
     if (powName == "g_invisible") {
         players[puPlayer].powerup.invisible++
         players[puPlayer].powerup.toClear.push(setTimeout(() => players[puPlayer].powerup.invisible--, gTimeout))
+    }
+    if (powName == "g_sine") {
+        players[puPlayer].powerup.sineStart = tFrame
+    }
+    if (powName == "g_ghost") {
+        players[puPlayer].powerup.ghost++
+        players[puPlayer].powerup.toClear.push(setTimeout(() => players[puPlayer].powerup.ghost--, gTimeout))
     }
     if (powName == "r_slow") {
         for (const otherPlayers in players) {
@@ -705,6 +778,42 @@ function doPowerups(puPlayer, index) {
             }
         }
     }
+    if (powName == "r_sine") {
+        for (const otherPlayers in players) {
+            if (otherPlayers != puPlayer) {
+                players[otherPlayers].powerup.sineStart = tFrame
+            }
+        }
+    }
+    if (powName == "r_swap") {
+        // teleports puPlayer and the nearest other living player to swap places (facing direction stays each player's own)
+        let target = null,
+            bestD = Infinity
+        for (const q in players) {
+            if (q == puPlayer || !players[q].ready || !players[q].alive) continue
+            const d = Math.hypot(players[q].x - players[puPlayer].x, players[q].y - players[puPlayer].y)
+            if (d < bestD) {
+                bestD = d
+                target = q
+            }
+        }
+        if (target) {
+            const tx = players[target].x,
+                ty = players[target].y
+            players[target].x = players[puPlayer].x
+            players[target].y = players[puPlayer].y
+            players[puPlayer].x = tx
+            players[puPlayer].y = ty
+        }
+    }
+    if (powName == "r_freeze") {
+        for (const otherPlayers in players) {
+            if (otherPlayers != puPlayer) {
+                players[otherPlayers].powerup.freeze++
+                players[otherPlayers].powerup.toClear.push(setTimeout(() => players[otherPlayers].powerup.freeze--, freezeTimeout))
+            }
+        }
+    }
     if (powName == "b_clear") {
         ctxTH.clearRect(0, 0, h, h)
     }
@@ -717,15 +826,25 @@ function doPowerups(puPlayer, index) {
         achtung.sides++
         achtung.clearSides.push(setTimeout(() => achtung.sides--, gTimeout))
     }
+    if (powName == "b_shrink") {
+        achtung.fieldInset = Math.min(achtung.fieldInset + h * 0.08, h * 0.3)
+        achtung.clearInset.push(setTimeout(() => (achtung.fieldInset -= h * 0.08), gTimeout))
+    }
+    if (powName == "b_grow") {
+        achtung.fieldInset = Math.max(achtung.fieldInset - h * 0.05, -hitboxSize * 0.8)
+        achtung.clearInset.push(setTimeout(() => (achtung.fieldInset += h * 0.05), gTimeout))
+    }
 }
 
 // updates the achtung object with data of a new powerup
 function powerupSpawner() {
     if (achtung.powerupsOnScreen.length > 30) return
-    let newPow = Math.floor(Math.random() * achtung.powerups.length),
+    const pool = achtung.powerups.filter((p) => achtung.enabledPowerups.has(p))
+    if (!pool.length) return
+    let newPow = Math.floor(Math.random() * pool.length),
         spawnX = Math.floor(Math.random() * h),
         spawnY = Math.floor(Math.random() * h),
-        powup = achtung.powerups[newPow]
+        powup = pool[newPow]
     // powup = "r_reverse" //  apklsdjalskdjalksdjlaksjdlakfjlæanæoæiuanweifupnaweifunaewæfnakdnfkalsjdfnklajsdfnkaljdnfklajnsdfklajnsdfkajdsnfkajdsnflakjdnf
 
     achtung.powerupsOnScreen[achtung.powerupsOnScreen.length] = {}
@@ -756,84 +875,9 @@ function powerupDraw() {
         ctxPH.arc(spawnX, spawnY, iconSize, 0, r2d(360), false)
         ctxPH.fill()
 
-        let greenGrad = ctxPV.createRadialGradient(0, 0, 0, 0, 0, iconSize)
-        greenGrad.addColorStop(0, green)
-        greenGrad.addColorStop(1, greent)
-        let redGrad = ctxPV.createRadialGradient(0, 0, 0, 0, 0, iconSize)
-        redGrad.addColorStop(0, red)
-        redGrad.addColorStop(1, redt)
-        let blueGrad = ctxPV.createRadialGradient(0, 0, 0, 0, 0, iconSize)
-        blueGrad.addColorStop(0, blue)
-        blueGrad.addColorStop(1, bluet)
-
         ctxPV.save()
         ctxPV.translate(spawnX, spawnY)
-
-        ctxPV.fillStyle = "#000000"
-        ctxPV.beginPath()
-        ctxPV.arc(0, 0, iconSize, 0, r2d(360), false)
-        ctxPV.fill()
-
-        if (pow.charAt(0) == "g") {
-            ctxPV.strokeStyle = green
-            ctxPV.fillStyle = greenGrad
-        }
-        if (pow.charAt(0) == "r") {
-            ctxPV.strokeStyle = red
-            ctxPV.fillStyle = redGrad
-        }
-        if (pow.charAt(0) == "b") {
-            ctxPV.strokeStyle = blue
-            ctxPV.fillStyle = blueGrad
-        }
-        if (pow.charAt(0) == "g" || pow.charAt(0) == "r" || pow.charAt(0) == "b") {
-            // draw bg
-            ctxPV.beginPath()
-            ctxPV.arc(0, 0, iconSize, 0, r2d(360), false)
-            ctxPV.stroke()
-            ctxPV.beginPath()
-            ctxPV.arc(0, 0, iconSize, 0, r2d(360), false)
-            ctxPV.fill()
-        } else {
-            // draw random bg
-            ctxPV.strokeStyle = blue
-            ctxPV.beginPath()
-            ctxPV.arc(0, 0, iconSize, 0, r2d(360), false)
-            ctxPV.stroke()
-
-            let line1 = [-65, -200]
-            let line2 = [-15, -250]
-
-            // draw blue section of bg
-            ctxPV.beginPath()
-            ctxPV.fillStyle = blueGrad
-            ctxPV.arc(0, 0, iconSize, r2d(line1[0]), r2d(line1[1]), true)
-            ctxPV.moveTo(Math.cos(r2d(line1[1])) * iconSize, Math.sin(r2d(line1[1])) * iconSize)
-            ctxPV.lineTo(Math.cos(r2d(line1[0])) * iconSize, Math.sin(r2d(line1[0])) * iconSize)
-            ctxPV.fill()
-
-            // draw red section of bg
-            ctxPV.beginPath()
-            ctxPV.fillStyle = redGrad
-            ctxPV.arc(0, 0, iconSize, r2d(line2[0]), r2d(line1[0]), true)
-            ctxPV.moveTo(Math.cos(r2d(line1[0])) * iconSize, Math.sin(r2d(line1[0])) * iconSize)
-            ctxPV.lineTo(Math.cos(r2d(line1[1])) * iconSize, Math.sin(r2d(line1[1])) * iconSize)
-            ctxPV.arc(0, 0, iconSize, r2d(line1[1]), r2d(line2[1]), true)
-            ctxPV.lineTo(Math.cos(r2d(line2[0])) * iconSize, Math.sin(r2d(line2[0])) * iconSize)
-            ctxPV.fill()
-
-            // draw green section of bg
-            ctxPV.beginPath()
-            ctxPV.fillStyle = greenGrad
-            ctxPV.arc(0, 0, iconSize, r2d(line2[1]), r2d(line2[0]), true)
-            ctxPV.moveTo(Math.cos(r2d(line2[0])) * iconSize, Math.sin(r2d(line2[0])) * iconSize)
-            ctxPV.lineTo(Math.cos(r2d(line2[1])) * iconSize, Math.sin(r2d(line2[1])) * iconSize)
-            ctxPV.fill()
-        }
-
-        // draw yellow icon
-        drawPowerupIcons(pow.slice(2))
-
+        drawPowerupBadge(ctxPV, pow, iconSize)
         ctxPV.restore()
     }
 }
