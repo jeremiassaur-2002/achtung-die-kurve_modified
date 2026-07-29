@@ -75,8 +75,17 @@ def build_stage(stage_cfg: dict, self_play_pool: SelfPlayPool | None, league: Le
     )
 
 
-def run_training(config_path: str | Path, init_from: str | None = None, run_root: str | Path = "ai/runs", run_name: str | None = None, timesteps_override: int | None = None) -> Path:
+def run_training(
+    config_path: str | Path,
+    init_from: str | None = None,
+    run_root: str | Path = "ai/runs",
+    run_name: str | None = None,
+    timesteps_override: int | None = None,
+    n_envs_override: int | None = None,
+) -> Path:
     cfg = load_config(config_path)
+    if n_envs_override is not None:
+        cfg["n_envs"] = n_envs_override
     phase = cfg["phase"]
     seed = cfg.get("seed", 0)
     run_name = run_name or f"phase{phase}_{int(time.time())}"
@@ -179,7 +188,10 @@ def run_training(config_path: str | Path, init_from: str | None = None, run_root
         )
 
     total_timesteps = timesteps_override or cfg["total_timesteps"]
-    model.learn(total_timesteps=total_timesteps, callback=CallbackList(callbacks), progress_bar=False)
+    # progress_bar=True: rollout collection can be quiet for a while on a CPU-constrained
+    # runtime (SB3 only logs metrics once per full rollout, i.e. every n_steps * n_envs
+    # steps) - a live bar makes clear it's working rather than looking hung.
+    model.learn(total_timesteps=total_timesteps, callback=CallbackList(callbacks), progress_bar=True)
 
     final_path = run_dir / "final_model.zip"
     model.save(str(final_path))
@@ -194,8 +206,16 @@ def main() -> None:
     parser.add_argument("--run-root", default="ai/runs")
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--timesteps", type=int, default=None, help="override total_timesteps from the config (e.g. for a quick smoke test)")
+    parser.add_argument("--n-envs", type=int, default=None, help="override n_envs from the config (match your runtime's actual CPU count - `!nproc` on Colab)")
     args = parser.parse_args()
-    run_training(args.config, init_from=args.init_from, run_root=args.run_root, run_name=args.run_name, timesteps_override=args.timesteps)
+    run_training(
+        args.config,
+        init_from=args.init_from,
+        run_root=args.run_root,
+        run_name=args.run_name,
+        timesteps_override=args.timesteps,
+        n_envs_override=args.n_envs,
+    )
 
 
 if __name__ == "__main__":

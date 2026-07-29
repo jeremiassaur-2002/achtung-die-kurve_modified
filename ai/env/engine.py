@@ -232,7 +232,7 @@ class CurveEngine:
         # 6) draw trail segment into the owner-id grid
         if not p.bridge and p.invisible == 0:
             width = max(1, round(c.player_size * p.size))
-            img = Image.fromarray(self.grid, mode="L")
+            img = Image.fromarray(self.grid)  # (H, W) uint8 -> PIL infers "L" without a mode= arg
             draw = ImageDraw.Draw(img)
             draw.line([(prevprev_x, prevprev_y), (p.x, p.y)], fill=p.slot, width=width)
             self.grid = np.array(img)  # copy, not asarray - PIL may hand back a read-only view

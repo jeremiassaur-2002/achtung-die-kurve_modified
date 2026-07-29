@@ -36,7 +36,7 @@ def render_frame(engine: CurveEngine, obs_resolution: int) -> np.ndarray:
     palette = _owner_palette(engine)
     rgb = palette[engine.grid]  # (S, S, 3) uint8, vectorized recolor of the owner-id grid
 
-    img = Image.fromarray(rgb, mode="RGB")
+    img = Image.fromarray(rgb)  # (H, W, 3) uint8 -> PIL infers "RGB" without a mode= arg
     draw = ImageDraw.Draw(img)
 
     c = engine.c
