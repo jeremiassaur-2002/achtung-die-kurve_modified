@@ -67,6 +67,13 @@ def win_rate_curve(metrics: pd.DataFrame, out_dir: Path) -> Path:
     return _line_chart(df, "step", "win_rate_pct", "Siegquote", "Win Rate (%)", out_dir / "win_rate_curve.png", CATEGORICAL[2])
 
 
+def episode_length_curve(metrics: pd.DataFrame, out_dir: Path) -> Path:
+    # the meaningful "progress" metric when there are no opponents to win against
+    # (Phase 1 solo survival: win_rate is structurally always 0%, since `won` is
+    # only ever set when opponents existed - see curve_env.py's step())
+    return _line_chart(metrics, "step", "ep_len_mean", "Überlebensdauer", "Ticks pro Episode", out_dir / "episode_length_curve.png", CATEGORICAL[4])
+
+
 def learning_rate_curve(metrics: pd.DataFrame, out_dir: Path) -> Path:
     return _line_chart(metrics, "step", "learning_rate", "Learning Rate", "Learning Rate", out_dir / "learning_rate_curve.png", CATEGORICAL[3])
 
