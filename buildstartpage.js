@@ -15,7 +15,7 @@ function buildStartPage() {
 
     const firstRow = document.createElement("section")
     firstRow.classList.add("player_wrapper_start")
-    Array.from(Array(4)).forEach((_, i) => {
+    Array.from(Array(5)).forEach((_, i) => {
         const p = document.createElement("p")
         if (i == 0) p.textContent = "#"
         if (i == 1) p.textContent = "Player"
@@ -25,6 +25,10 @@ function buildStartPage() {
         }
         if (i == 3) {
             p.textContent = "Right"
+            p.classList.add("text_center")
+        }
+        if (i == 4) {
+            p.textContent = "KI"
             p.classList.add("text_center")
         }
         firstRow.append(p)
@@ -59,6 +63,35 @@ function buildStartPage() {
             pKeyWrap.append(pKey)
             pWrap.append(pKeyWrap)
         })
+
+        // KI-Häkchen: macht diesen Slot per Klick zu einem KI-Bot (ai_bot.js), ohne
+        // Tastenbelegung - siehe addAI()/removeAI() dort für das eigentliche Verhalten
+        const aiCell = document.createElement("div")
+        aiCell.classList.add("text_center")
+        const aiCheckbox = document.createElement("input")
+        aiCheckbox.type = "checkbox"
+        aiCheckbox.title = "Gegen KI-Bot spielen"
+        aiCheckbox.addEventListener("click", (e) => e.stopPropagation()) // don't also trigger the row's playerClick
+        aiCheckbox.addEventListener("change", async () => {
+            aiCheckbox.disabled = true
+            try {
+                resetPlayer(pWrap) // clear any partial human key-binding state for this seat first
+                if (aiCheckbox.checked) {
+                    await addAI(player)
+                } else {
+                    removeAI(player)
+                }
+            } catch (err) {
+                console.error(`KI konnte nicht geladen werden fuer ${player}:`, err)
+                alert("KI konnte nicht geladen werden - liegt model.onnx neben index.html, und läuft die Seite über einen lokalen Server (nicht file://)?")
+                aiCheckbox.checked = false
+            } finally {
+                aiCheckbox.disabled = false
+            }
+        })
+        aiCell.append(aiCheckbox)
+        pWrap.append(aiCell)
+
         playerGrid.append(pWrap)
     }
 

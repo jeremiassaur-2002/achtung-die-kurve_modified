@@ -121,7 +121,7 @@ canvas {
 .player_wrapper_start {
     width: 100%;
     display: grid;
-    grid-template-columns: 10% 30% 30% 30%;
+    grid-template-columns: 8% 24% 23% 23% 22%;
     margin: 0;
     background-color: #000;
     border: none;
@@ -132,6 +132,12 @@ canvas {
 .player_wrapper p {
     font-size: 35px;
     line-height: 1.7;
+    cursor: pointer;
+}
+
+.player_wrapper input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
     cursor: pointer;
 }
 

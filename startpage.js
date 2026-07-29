@@ -30,6 +30,8 @@ const notTheseKeys = [
 ]
 
 function playerClick(name) {
+    if (players[name].isAI) return // seat is KI-controlled - uncheck its KI box first to reclaim it as human
+
     players[name].active = !players[name].active //switch active or not
 
     const w = document.querySelector(`.player_wrapper.${name}`)

@@ -211,8 +211,6 @@ document.addEventListener("keypress", (e) => {
 })
 
 function pressSpace() {
-    if (achtung.startScreen) applyBotSelection() // fill any unclaimed slots with bots per the checkbox/count
-
     let playingC = 0
     for (const player in players) {
         if (players[player].ready) playingC++
