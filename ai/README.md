@@ -83,9 +83,16 @@ python -m ai.export.export_onnx --checkpoint <final_model.zip> --out ai/exported
 python -m ai.export.export_weights --checkpoint <final_model.zip> --out-dir ai/exported
 ```
 
-Copy `model.onnx` next to `index.html`, then from the browser console: `addAI('fred')` (or any other player name)
-makes that seat an AI player using onnxruntime-web - see `ai_bot.js`'s header comment for the exact setup and how
-its observation construction mirrors `ai/env/observation.py`.
+`export_onnx.py` also writes a `model_data.js` sidecar next to the `.onnx` file (the model bytes, base64-embedded
+as `const AI_MODEL_BASE64 = "..."`). Copy both `model.onnx` and `model_data.js` next to `index.html` - `model_data.js`
+is what lets the game work by just double-clicking `index.html` (`file://`): onnxruntime-web normally loads the
+model via `fetch()`, which browsers block for local files under `file://`, but a plain `<script src="model_data.js">`
+has no such restriction, so `ai_bot.js` prefers the embedded bytes when they're present (falling back to fetching
+`model.onnx` by URL only if you skip the sidecar and serve the page over a local server instead).
+
+On the start screen, tick a player's **KI** checkbox (next to Left/Right) to make that seat an AI player - or from
+the browser console, `addAI('fred')` (any other player name). See `ai_bot.js`'s header comment for how its
+observation construction mirrors `ai/env/observation.py`.
 
 ## A note on `engine_resolution`
 

@@ -3,13 +3,22 @@
 //  ai/export/export_onnx.py) as an in-browser opponent, using onnxruntime-web.
 //
 //  Setup:
-//    1. Train + export a model (see ai/colab/Train_Achtung_Kurve_AI.ipynb), then
-//       copy the resulting model.onnx next to index.html (or host it anywhere
-//       and pass its URL to addAI()).
+//    1. Train + export a model (see ai/colab/Train_Achtung_Kurve_AI.ipynb). By
+//       default ai/export/export_onnx.py also writes a `model_data.js` sidecar
+//       (the .onnx bytes base64-embedded as `const AI_MODEL_BASE64 = "..."`).
+//       Copy BOTH next to index.html, and add:
+//         <script src="model_data.js" defer></script>
+//       ...somewhere before you call addAI() (order relative to ai_bot.js
+//       itself doesn't matter, since addAI only runs on user interaction).
+//       This is what lets the game work by just double-clicking index.html
+//       (file://) - onnxruntime-web loads the model via fetch() otherwise,
+//       which browsers block for local files under file://.
 //    2. Add this script tag to index.html, AFTER script.js:
 //         <script src="ai_bot.js" defer></script>
-//    3. From the console (or your own UI): addAI('fred') to make fred an AI
-//       player using ./model.onnx, or addAI('fred', 'path/or/url/to/model.onnx').
+//    3. From the start screen, tick a player's "KI" checkbox - or from the
+//       console: addAI('fred'). Without a model_data.js, addAI(name, url) falls
+//       back to fetching the .onnx by URL, which needs a local server (e.g.
+//       `python -m http.server`), not file://.
 //
 //  Interface: identical shape to the old bot.js - a player with `isAI = true`
 //  gets `aiThink(name)` called once per simulation tick (see script.js's
@@ -147,6 +156,13 @@ async function aiThink(name) {
     }
 }
 
+function _base64ToBytes(base64) {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes
+}
+
 // ============================================================================
 //  AI player management (mirrors the old bot.js's addBot/removeBot shape)
 // ============================================================================
@@ -154,7 +170,10 @@ async function addAI(name, modelUrl = "model.onnx", obsResolution = AI_DEFAULT_O
     if (!players[name]) return console.warn("Kein Spieler namens", name)
     await _ensureOrtLoaded()
 
-    const session = await ort.InferenceSession.create(modelUrl, { executionProviders: ["wasm"] })
+    // prefer the embedded model_data.js bytes (works under file://); only fetch
+    // by URL if that sidecar wasn't loaded (needs a local server, not file://)
+    const modelSource = typeof AI_MODEL_BASE64 !== "undefined" ? _base64ToBytes(AI_MODEL_BASE64) : modelUrl
+    const session = await ort.InferenceSession.create(modelSource, { executionProviders: ["wasm"] })
     _aiState[name] = { session, frames: [], obsResolution, frameStack, busy: false }
 
     players[name].isAI = true
@@ -171,7 +190,8 @@ async function addAI(name, modelUrl = "model.onnx", obsResolution = AI_DEFAULT_O
         if (lt) lt.textContent = "AI"
         if (rt) rt.textContent = ""
     }
-    console.log(`${name} ist jetzt eine KI (${modelUrl}).`)
+    const sourceLabel = typeof AI_MODEL_BASE64 !== "undefined" ? "embedded model_data.js" : modelUrl
+    console.log(`${name} ist jetzt eine KI (${sourceLabel}).`)
 }
 
 function removeAI(name) {

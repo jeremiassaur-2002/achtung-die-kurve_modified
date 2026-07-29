@@ -12,6 +12,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import base64
 from pathlib import Path
 
 import torch as th
@@ -72,6 +73,19 @@ def export_onnx(model_path: str, out_path: str, obs_cfg: ObsConfig | None = None
     return out_path
 
 
+def export_onnx_js_data(onnx_path: str | Path, js_path: str | Path | None = None) -> Path:
+    """Base64-embeds the .onnx file into a plain <script>-loadable .js file
+    (`const AI_MODEL_BASE64 = "..."`). ai_bot.js prefers this over fetching the
+    .onnx by URL, because opening index.html directly (file://, no local server)
+    blocks fetch() of local files entirely - a normal <script src="..."> tag has
+    no such restriction, so embedding the bytes sidesteps the problem completely."""
+    onnx_path = Path(onnx_path)
+    js_path = Path(js_path) if js_path is not None else onnx_path.with_name(onnx_path.stem + "_data.js")
+    encoded = base64.b64encode(onnx_path.read_bytes()).decode("ascii")
+    js_path.write_text(f'const AI_MODEL_BASE64 = "{encoded}";\n')
+    return js_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export a trained SB3 checkpoint to ONNX for in-browser inference.")
     parser.add_argument("--checkpoint", required=True)
@@ -79,11 +93,15 @@ def main() -> None:
     parser.add_argument("--obs-resolution", type=int, default=96)
     parser.add_argument("--frame-stack", type=int, default=4)
     parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--no-js-data", action="store_true", help="skip emitting the base64 <script>-loadable sidecar file")
     args = parser.parse_args()
 
     obs_cfg = ObsConfig(obs_resolution=args.obs_resolution, frame_stack=args.frame_stack)
     path = export_onnx(args.checkpoint, args.out, obs_cfg, opset_version=args.opset)
     print(f"exported ONNX model -> {path}")
+    if not args.no_js_data:
+        js_path = export_onnx_js_data(path)
+        print(f"exported browser-embeddable data -> {js_path} (load via <script src=\"{js_path.name}\">)")
 
 
 if __name__ == "__main__":
