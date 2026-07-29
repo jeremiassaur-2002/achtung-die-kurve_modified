@@ -65,6 +65,9 @@ def export_onnx(model_path: str, out_path: str, obs_cfg: ObsConfig | None = None
         output_names=["action_logits"],
         dynamic_axes={"image": {0: "batch"}, "vector": {0: "batch"}, "action_logits": {0: "batch"}},
         opset_version=opset_version,
+        dynamo=False,  # the newer dynamo exporter needs the optional `onnxscript` package;
+        # this graph is a plain feedforward CNN+MLP with no control flow, so the
+        # legacy TorchScript-based exporter (no extra dependency) is a clean fit
     )
     return out_path
 
