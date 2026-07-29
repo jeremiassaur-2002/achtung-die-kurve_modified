@@ -39,7 +39,6 @@ def generate_report(metrics_csv: str | Path, report_dir: str | Path, milestone: 
     image_lines = []
     if not metrics.empty:
         image_lines.append(("Reward-Verlauf", plots.reward_curve(metrics, milestone_dir)))
-        image_lines.append(("Überlebensdauer", plots.episode_length_curve(metrics, milestone_dir)))
         image_lines.append(("Siegquote", plots.win_rate_curve(metrics, milestone_dir)))
         image_lines.append(("Learning Rate", plots.learning_rate_curve(metrics, milestone_dir)))
         image_lines.append(("Entropy", plots.entropy_curve(metrics, milestone_dir)))
@@ -54,10 +53,6 @@ def generate_report(metrics_csv: str | Path, report_dir: str | Path, milestone: 
     last_reward = _last_valid(metrics, "reward_mean")
     last_winrate = _last_valid(metrics, "win_rate")
     last_lr = _last_valid(metrics, "learning_rate")
-    last_ep_len = _last_valid(metrics, "ep_len_mean")
-
-    stages = run_config.get("curriculum", {}).get("stages", [])
-    solo_only = bool(stages) and all(s.get("n_opponents", 0) == 0 for s in stages)
 
     lines = [
         f"# Trainingsreport - Meilenstein {milestone:,} Schritte".replace(",", "."),
@@ -65,13 +60,8 @@ def generate_report(metrics_csv: str | Path, report_dir: str | Path, milestone: 
         f"- **Aktuelles Elo (beste Version)**: {best_elo:.0f}" if best_elo is not None else "- **Aktuelles Elo**: n/a",
         f"- **Beste Version**: {best.name}" if best is not None else "- **Beste Version**: n/a",
         f"- **Reward (Mittelwert, letzte Episoden)**: {last_reward:.3f}" if last_reward is not None else "- **Reward**: n/a",
-        f"- **Überlebensdauer (Ticks, letzte Episoden)**: {last_ep_len:.1f}" if last_ep_len is not None else "- **Überlebensdauer**: n/a",
         f"- **Win Rate (letzte Episoden)**: {last_winrate * 100:.1f}%" if last_winrate is not None else "- **Win Rate**: n/a",
         f"- **Learning Rate (aktuell)**: {last_lr}" if last_lr is not None else "- **Learning Rate**: n/a",
-    ]
-    if solo_only:
-        lines.append("- _Hinweis: keine Gegner in dieser Phase konfiguriert (`n_opponents: 0`) - Win Rate ist daher strukturell immer 0%, maßgeblich ist hier die Überlebensdauer._")
-    lines += [
         "",
         "## Trainingsparameter",
         "```yaml",
