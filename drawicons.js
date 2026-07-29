@@ -31,9 +31,6 @@ const drawPowerupIcons = (icon, ctx = ctxPV, size = iconSize, fillColor = yellow
     let pathReverse2 = new Path2D(
         "M838.8,668.3L658.6,562.2c-2.7-1.6-6-1.1-8.2,1.1c-2.1,2.2-2.5,5.6-0.8,8.2c19.4,30.4,29.2,62,31,82.6H295.9 c-3.7,0-6.6,3-6.6,6.7v26.6c0,3.7,3,6.7,6.6,6.7h384.8c-1.8,20.7-11.6,52.2-31,82.6c-1.7,2.6-1.3,6,0.8,8.2c1.3,1.3,3,2,4.8,2 c1.2,0,2.3-0.3,3.4-0.9l180.2-106.1c2-1.2,3.3-3.4,3.3-5.7S840.8,669.5,838.8,668.3L838.8,668.3z"
     )
-    let pathRobot = new Path2D(
-        "M482,871.4H238.4V473.5h73.6V234.2h33.2v272.5h-73.6v331.4h177.1V589.2h248.9V436.6H543.5V243.9h301.4v478.5 H965v33.2H811.6V277.1h-235v126.3h154.2v219H482C481.9,721.1,481.8,824.8,482,871.4z"
-    )
     let pathSide = new Path2D(
         "M236.4,236.3v607.3h607.3V236.3C620.4,236.3,410.1,236.3,236.4,236.3z M269.6,810.4V580.1l172.6,172.6 l23.5-23.5L269.6,533.1V269.6h540.8V481l-162-162l-23.5,23.5L810.4,528v282.4L269.6,810.4L269.6,810.4z"
     )
@@ -191,7 +188,6 @@ const drawPowerupIcons = (icon, ctx = ctxPV, size = iconSize, fillColor = yellow
         more: [pathMore1, pathMore2, pathMore3],
         random: [pathRandom1, pathRandom2, pathRandom3],
         reverse: [pathReverse1, pathReverse2],
-        robot: [pathRobot],
         shrink: [pathShrink],
         side: [pathSide],
         sides: [

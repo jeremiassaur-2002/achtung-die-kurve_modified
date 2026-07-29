@@ -23,7 +23,6 @@ let achtung = {
         "g_slow",
         "g_fast",
         "g_thin",
-        "g_robot",
         "g_side",
         "g_invisible",
         "g_sine",
@@ -31,7 +30,6 @@ let achtung = {
         "r_slow",
         "r_fast",
         "r_thick",
-        "r_robot",
         "r_reverse",
         "r_sine",
         "r_swap",
@@ -140,7 +138,6 @@ function init() {
         players[player].bridgeFrame = 0
         players[player].powerup = {} // contains powerup values
         players[player].powerup.size = 1
-        players[player].powerup.robot = 0
         players[player].powerup.reverse = 0
         players[player].powerup.speed = 1
         players[player].powerup.invisible = 0
@@ -356,28 +353,13 @@ function draw(now = performance.now()) {
                 ctxDO.fillStyle = blue
             } else ctxDO.fillStyle = `rgba(0, 0, 255, ${Math.abs((tFrame % 40) - 20) / 20})` // flicker dot if side powerup
         }
-        if (players[player].powerup.robot == 0) {
-            // draw dot if normal
-            ctxDO.beginPath()
-            ctxDO.arc(nextPosX, nextPosY, (playerSize / 2) * players[player].powerup.size, 0, r2d(360), true)
-            ctxDO.fill()
-        } else {
-            // draw square if robot
-            ctxDO.save()
-            ctxDO.translate(nextPosX, nextPosY)
-            ctxDO.rotate(players[player].dir - r2d(270))
-            ctxDO.fillRect(
-                (-playerSize / 2) * players[player].powerup.size,
-                (-playerSize / 2) * players[player].powerup.size,
-                playerSize * players[player].powerup.size,
-                playerSize * players[player].powerup.size
-            )
-            ctxDO.restore()
-        }
+        ctxDO.beginPath()
+        ctxDO.arc(nextPosX, nextPosY, (playerSize / 2) * players[player].powerup.size, 0, r2d(360), true)
+        ctxDO.fill()
 
         if (!players[player].alive) continue // continue if player not alive (drawing dot is above, so player dot will still be drawn even if dead)
 
-        if (players[player].isBot) botThink(player) // let bot.js set turnL/turnR for this frame
+        if (players[player].isAI) aiThink(player) // let ai_bot.js set turnL/turnR for this frame
 
         // update player turning
         // powerup.sineStart (g_sine/r_sine) scales turn intensity by a sine wave between
@@ -395,28 +377,13 @@ function draw(now = performance.now()) {
 
         if (players[player].powerup.freeze == 0) {
             // r_freeze blocks steering entirely for its duration - held keys just resume once it ends
-            if (players[player].powerup.robot == 0) {
-                // if normal
-                if (players[player].turnL) {
-                    if (players[player].powerup.reverse == 0) players[player].dir -= (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
-                    else players[player].dir += (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
-                }
-                if (players[player].turnR) {
-                    if (players[player].powerup.reverse == 0) players[player].dir += (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
-                    else players[player].dir -= (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
-                }
-            } else {
-                // if robot
-                if (players[player].turnL) {
-                    players[player].turnL = false
-                    if (players[player].powerup.reverse == 0) players[player].dir -= r2d(90) * turnFactor
-                    else players[player].dir += r2d(90) * turnFactor
-                }
-                if (players[player].turnR) {
-                    players[player].turnR = false
-                    if (players[player].powerup.reverse == 0) players[player].dir += r2d(90) * turnFactor
-                    else players[player].dir -= r2d(90) * turnFactor
-                }
+            if (players[player].turnL) {
+                if (players[player].powerup.reverse == 0) players[player].dir -= (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+                else players[player].dir += (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+            }
+            if (players[player].turnR) {
+                if (players[player].powerup.reverse == 0) players[player].dir += (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
+                else players[player].dir -= (turnSpeed * turnFactor) / Math.pow(players[player].powerup.size, 0.3)
             }
         }
 
@@ -483,24 +450,15 @@ function draw(now = performance.now()) {
         if (!players[player].bridge && players[player].powerup.invisible == 0) {
             ctxTH.strokeStyle = players[player].color
             ctxTH.lineWidth = playerSize * players[player].powerup.size
+            ctxTH.lineCap = "butt"
             ctxTH.beginPath()
-            if (players[player].powerup.robot != 0) {
-                ctxTH.lineCap = "round"
-                ctxTH.moveTo(prevPosX, prevPosY)
-            } else {
-                ctxTH.lineCap = "butt"
-                ctxTH.moveTo(prevprevPosX, prevprevPosY)
-            }
+            ctxTH.moveTo(prevprevPosX, prevprevPosY)
             ctxTH.lineTo(players[player].x, players[player].y)
             ctxTH.stroke()
         }
 
         // check collision
-        // the robot trail is drawn with lineCap "round", so it sticks out lineWidth/2 past the
-        // player position - that leaves the front sample less than 1px of clearance and rounding
-        // makes it randomly hit the carrier's own fresh trail. add 2px clearance while robot is
-        // active so the square powerup can't kill its own carrier (issue #1)
-        const frontDist = hitboxSize * players[player].powerup.size + (players[player].powerup.robot != 0 ? 2 : 0)
+        const frontDist = hitboxSize * players[player].powerup.size
         const pxFront = Math.round(players[player].x + mathCos(players[player].dir) * frontDist)
         const pyFront = Math.round(players[player].y + mathSin(players[player].dir) * frontDist)
         const pxFront2 = Math.round(players[player].x + mathCos(players[player].dir))
@@ -555,23 +513,15 @@ function draw(now = performance.now()) {
                 // still dies to walls and everyone else's trail, just not their own
                 const own = players[player].colorRGB
                 const isOwnTrail = (d) => players[player].powerup.ghost != 0 && d[3] == 255 && d[0] == own[0] && d[1] == own[1] && d[2] == own[2]
-                if (players[player].powerup.robot == 0) {
-                    // check alpha value of pixels front, front2, left, right
-                    if (
-                        (imgDataFrontTH[3] == 255 && !isOwnTrail(imgDataFrontTH)) ||
-                        (imgDataFront2TH[3] == 255 && !isOwnTrail(imgDataFront2TH)) ||
-                        (imgDataLeftTH[3] == 255 && !isOwnTrail(imgDataLeftTH)) ||
-                        (imgDataRightTH[3] == 255 && !isOwnTrail(imgDataRightTH))
-                    ) {
-                        givePoints(players[player])
-                        continue
-                    }
-                } else {
-                    if (imgDataFrontTH[3] == 255 && !isOwnTrail(imgDataFrontTH)) {
-                        // if robot only check alpha value of front
-                        givePoints(players[player])
-                        continue
-                    }
+                // check alpha value of pixels front, front2, left, right
+                if (
+                    (imgDataFrontTH[3] == 255 && !isOwnTrail(imgDataFrontTH)) ||
+                    (imgDataFront2TH[3] == 255 && !isOwnTrail(imgDataFront2TH)) ||
+                    (imgDataLeftTH[3] == 255 && !isOwnTrail(imgDataLeftTH)) ||
+                    (imgDataRightTH[3] == 255 && !isOwnTrail(imgDataRightTH))
+                ) {
+                    givePoints(players[player])
+                    continue
                 }
             }
         }
@@ -699,7 +649,7 @@ const drawGameUI = () => {
 function doPowerups(puPlayer, index) {
     let gTimeout = 8000
     let rTimeout = 5000
-    let freezeTimeout = 1000 // r_freeze is stronger than r_reverse, so it stays much shorter
+    let freezeTimeout = 500 // r_freeze is stronger than r_reverse, so it stays much shorter
     let powName = players[puPlayer].powerup.powerupArray[index]
 
     // powerup starts
@@ -718,10 +668,6 @@ function doPowerups(puPlayer, index) {
     if (powName == "g_thin") {
         players[puPlayer].powerup.size *= 0.5
         players[puPlayer].powerup.toClear.push(setTimeout(() => (players[puPlayer].powerup.size *= 2), gTimeout))
-    }
-    if (powName == "g_robot") {
-        players[puPlayer].powerup.robot++
-        players[puPlayer].powerup.toClear.push(setTimeout(() => players[puPlayer].powerup.robot--, gTimeout))
     }
     if (powName == "g_side") {
         players[puPlayer].powerup.side++
@@ -762,14 +708,6 @@ function doPowerups(puPlayer, index) {
             }
         }
     }
-    if (powName == "r_robot") {
-        for (const otherPlayers in players) {
-            if (otherPlayers != puPlayer) {
-                players[otherPlayers].powerup.robot++
-                players[otherPlayers].powerup.toClear.push(setTimeout(() => players[otherPlayers].powerup.robot--, rTimeout))
-            }
-        }
-    }
     if (powName == "r_reverse") {
         for (const otherPlayers in players) {
             if (otherPlayers != puPlayer) {
@@ -786,7 +724,9 @@ function doPowerups(puPlayer, index) {
         }
     }
     if (powName == "r_swap") {
-        // teleports puPlayer and the nearest other living player to swap places (facing direction stays each player's own)
+        // swaps puPlayer and the nearest other living player - position AND heading both swap,
+        // so each of them continues on as if they'd physically become the other player,
+        // just still drawing their own trail color
         let target = null,
             bestD = Infinity
         for (const q in players) {
@@ -799,11 +739,14 @@ function doPowerups(puPlayer, index) {
         }
         if (target) {
             const tx = players[target].x,
-                ty = players[target].y
+                ty = players[target].y,
+                td = players[target].dir
             players[target].x = players[puPlayer].x
             players[target].y = players[puPlayer].y
+            players[target].dir = players[puPlayer].dir
             players[puPlayer].x = tx
             players[puPlayer].y = ty
+            players[puPlayer].dir = td
         }
     }
     if (powName == "r_freeze") {

@@ -1,0 +1,25 @@
+# Core RL stack
+torch>=2.4
+stable-baselines3[extra]>=2.3,<3.0
+sb3-contrib>=2.3,<3.0
+gymnasium>=0.29,<1.1
+
+# Env simulation / rendering (headless, no display needed - pure numpy/Pillow rasterization)
+numpy>=1.26
+Pillow>=10.0
+
+# Model export for in-browser inference
+onnx>=1.16
+onnxruntime>=1.18
+
+# Config / utilities
+pyyaml>=6.0
+tqdm>=4.66
+
+# Monitoring / reporting
+tensorboard>=2.16
+matplotlib>=3.8
+pandas>=2.2
+
+# Tests
+pytest>=8.0

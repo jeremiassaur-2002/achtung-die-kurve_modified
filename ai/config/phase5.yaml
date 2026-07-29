@@ -1,0 +1,54 @@
+# Phase 5 - items: same league mix as Phase 4, with the full item set active.
+# Start from Phase 4's checkpoint via `--init-from`.
+phase: 5
+description: "Items active - collection, buffs/debuffs, board effects."
+
+total_timesteps: 10000000
+n_envs: 8
+use_subprocess: true
+seed: 0
+
+engine_resolution: 256
+obs_resolution: 96
+frame_stack: 4
+max_episode_ticks: 3600
+
+use_action_masking: false
+action_mask_horizon: 3
+cnn_arch: medium
+
+ppo:
+  learning_rate: 0.00015
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+reward:
+  alive_bonus: 0.01
+  death_penalty: -1.0
+  kill_bonus: 0.5
+  win_bonus: 2.0
+  placement_scale: 0.3
+
+curriculum:
+  blend_window_episodes: 1
+  rolling_window: 300
+  pool_variants: 8
+  stages:
+    - name: league_items
+      n_opponents: 5
+      opponent_mix: ["league", "league", "league", "league", "league"]
+      items_enabled: true
+      win_rate_threshold: 1.1
+      min_episodes: 999999999
+
+enable_league: true
+league_checkpoint_milestones: [10, 25, 50, 100, 200, 500]
+league_save_every_steps: 50000
+league_n_opponents: 5
+league_eval_every_steps: 50000
+league_eval_matches: 6

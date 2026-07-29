@@ -1,1 +1,11 @@
 .DS_Store
+
+# Python / RL training system (ai/)
+ai/.venv/
+__pycache__/
+*.pyc
+ai/runs/
+ai/checkpoints/
+ai/league/
+ai/logs/
+ai/reports/

@@ -1,0 +1,51 @@
+# Phase 1 - solo survival: avoid the wall, avoid your own trail, live as long as
+# possible. No opponents, no items, no win condition (see curve_env.py: episodes
+# with zero opponents only end on death/truncation, never on "alive_count<=1").
+phase: 1
+description: "Solo survival - wall + self-trail avoidance."
+
+total_timesteps: 2000000
+n_envs: 8
+use_subprocess: true
+seed: 0
+
+engine_resolution: 256
+obs_resolution: 96
+frame_stack: 4
+max_episode_ticks: 3600
+
+use_action_masking: false
+action_mask_horizon: 3
+cnn_arch: small
+
+ppo:
+  learning_rate: 0.0003
+  n_steps: 512
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+reward:
+  alive_bonus: 0.01
+  death_penalty: -1.0
+  kill_bonus: 0.0
+  win_bonus: 0.0
+  placement_scale: 0.0
+
+curriculum:
+  blend_window_episodes: 50
+  rolling_window: 200
+  pool_variants: 4
+  stages:
+    - name: solo
+      n_opponents: 0
+      opponent_mix: []
+      items_enabled: false
+      win_rate_threshold: 1.1
+      min_episodes: 999999999
+
+enable_league: false
+enable_self_play_snapshots: false

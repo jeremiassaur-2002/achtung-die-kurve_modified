@@ -1,0 +1,74 @@
+# Phase 3 - multiplayer: 2 to 5 simultaneous opponents (the brief says "2 to 6" -
+# capped at 5 here because the actual game only has 6 named player slots total,
+# fred/greenlee/pinkney/bluebell/willem/greydon, i.e. 1 hero + at most 5 others;
+# this is a hard constraint from script.js's player roster, not a simplification).
+# Curriculum soft-ratchets opponent count up as rolling win rate clears each stage's
+# threshold. Start from Phase 2's checkpoint via `--init-from`.
+phase: 3
+description: "Multiplayer curriculum - 2..5 opponents, space management and risk."
+
+total_timesteps: 6000000
+n_envs: 8
+use_subprocess: true
+seed: 0
+
+engine_resolution: 256
+obs_resolution: 96
+frame_stack: 4
+max_episode_ticks: 3600
+
+use_action_masking: false
+action_mask_horizon: 3
+cnn_arch: medium
+
+ppo:
+  learning_rate: 0.00025
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+reward:
+  alive_bonus: 0.01
+  death_penalty: -1.0
+  kill_bonus: 0.5
+  win_bonus: 2.0
+  placement_scale: 0.3
+
+curriculum:
+  blend_window_episodes: 150
+  rolling_window: 300
+  pool_variants: 8
+  stages:
+    - name: two_opponents
+      n_opponents: 2
+      opponent_mix: ["self_play", "rule_based:easy"]
+      items_enabled: false
+      win_rate_threshold: 0.55
+      min_episodes: 400
+    - name: three_opponents
+      n_opponents: 3
+      opponent_mix: ["self_play", "self_play", "rule_based:medium"]
+      items_enabled: false
+      win_rate_threshold: 0.45
+      min_episodes: 400
+    - name: four_opponents
+      n_opponents: 4
+      opponent_mix: ["self_play", "self_play", "rule_based:medium", "rule_based:hard"]
+      items_enabled: false
+      win_rate_threshold: 0.35
+      min_episodes: 400
+    - name: five_opponents
+      n_opponents: 5
+      opponent_mix: ["self_play", "self_play", "self_play", "rule_based:hard", "rule_based:hunter"]
+      items_enabled: false
+      win_rate_threshold: 0.25
+      min_episodes: 999999999
+
+enable_league: false
+enable_self_play_snapshots: true
+self_play_snapshot_every_steps: 50000
+self_play_max_snapshots: 10
