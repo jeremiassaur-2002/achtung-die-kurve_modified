@@ -16,6 +16,10 @@ onnxruntime>=1.18
 pyyaml>=6.0
 tqdm>=4.66
 
+# Behavior videos (VideoCallback -> MP4)
+imageio>=2.34
+imageio-ffmpeg>=0.5
+
 # Monitoring / reporting
 tensorboard>=2.16
 matplotlib>=3.8

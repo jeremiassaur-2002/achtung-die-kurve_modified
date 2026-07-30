@@ -168,3 +168,24 @@ def test_b_clear_wipes_the_grid():
     e.grid[10, 10] = 1
     e._apply_item("b_clear", "fred")
     assert e.grid.sum() == 0
+
+
+def test_straight_line_reaches_border_from_any_heading():
+    # Regression fuer den Insta-Selbstkollisions-Bug: PILs dicke Linie + binaeres
+    # Owner-Grid toeteten Geradeausfahrt frueher fuer die meisten Richtungen an der
+    # eigenen, gerade gezeichneten Spur (der Browser ueberlebt dank Canvas-
+    # Antialiasing und der alpha==255-Pruefung). Mit der Frische-Grace-Period muss
+    # jede Richtung sauber bis zur Wand kommen.
+    e = _engine(256)
+    for k in range(24):
+        e.reset(["fred"], enabled_items=set(), seed=0)
+        p = e.players["fred"]
+        p.x = p.y = 128.0
+        p.dir = k / 24 * 2 * math.pi
+        cause = None
+        for _ in range(600):
+            info = e.step({"fred": STRAIGHT})["fred"]
+            if not info.alive:
+                cause = info.death_cause
+                break
+        assert cause == "border", f"Richtung {k}/24: starb an {cause!r} statt die Wand zu erreichen"

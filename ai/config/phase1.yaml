@@ -34,6 +34,18 @@ reward:
   kill_bonus: 0.0
   win_bonus: 0.0
   placement_scale: 0.0
+  # ONE potential-based clearance term replaces "stay centered" / "steer away from
+  # wall" / "steer away from own trail" / "drive parallel" event bonuses: those are
+  # farmable (approach + turn away = free reward loop) and pull in opposite
+  # directions; a potential over distance-to-nearest-obstacle rewards exactly the
+  # same instincts without changing the optimal policy (see RewardConfig).
+  clearance_weight: 0.05
+  clearance_range_px: 40.0
+  clearance_rays: 8
+  shaping_gamma: 0.99   # keep equal to ppo.gamma
+  # end the episode the moment the border is provably unescapable (turning-radius
+  # geometry) - moves the death penalty onto the decision that caused it
+  terminate_doomed_border: true
 
 curriculum:
   blend_window_episodes: 50
@@ -49,3 +61,11 @@ curriculum:
 
 enable_league: false
 enable_self_play_snapshots: false
+
+# rotating resumable checkpoints (only the newest survives; --resume auto continues)
+checkpoint_every_steps: 100000
+checkpoint_keep: 1
+# one deterministic behavior video per interval, written headlessly as MP4 into
+# <run>/videos/ (on Drive when --run-root points there); 0 disables
+video_every_steps: 500000
+video_seconds: 30

@@ -20,7 +20,7 @@ from stable_baselines3.common.utils import set_random_seed
 
 from ai.config import game_constants as gc
 from ai.config.game_constants import GameConstants
-from ai.env.curve_env import CurveEnvConfig, RewardConfig
+from ai.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
 from ai.env.observation import ObsConfig
 from ai.env.opponents import OpponentSpec
 from ai.env.vec_factory import build_vec_env
@@ -34,6 +34,8 @@ from ai.training.callbacks import (
     SelfPlaySnapshotCallback,
 )
 from ai.training.curriculum import CurriculumManager, CurriculumStage
+from ai.training.drive_callbacks import RotatingCheckpointCallback, VideoCallback
+from ai.training.run_persistence import latest_checkpoint
 from ai.training.league import League
 from ai.training.self_play import SelfPlayPool
 
@@ -78,6 +80,7 @@ def build_stage(stage_cfg: dict, self_play_pool: SelfPlayPool | None, league: Le
 def run_training(
     config_path: str | Path,
     init_from: str | None = None,
+    resume: str | None = None,
     run_root: str | Path = "ai/runs",
     run_name: str | None = None,
     timesteps_override: int | None = None,
@@ -148,12 +151,37 @@ def run_training(
     ppo_kwargs = dict(cfg.get("ppo", {}))
     policy_kwargs = build_policy_kwargs(cnn_arch=cfg.get("cnn_arch", "small"))
 
-    if init_from:
+    # --resume continues THIS phase's own run (weights + optimizer + step counter,
+    # so `total_timesteps` keeps counting where it left off); --init-from only
+    # warm-starts weights for a NEW phase. A found resume checkpoint wins over
+    # --init-from, which makes the Colab cells idempotent: crash -> just re-run.
+    resume_ckpt = None
+    if resume == "auto":
+        resume_ckpt = latest_checkpoint(run_dir / "checkpoints")
+    elif resume:
+        resume_ckpt = Path(resume)
+        if not resume_ckpt.exists():
+            raise FileNotFoundError(f"--resume checkpoint not found: {resume_ckpt}")
+    resumed = resume_ckpt is not None
+
+    if resumed:
+        model = AlgoCls.load(resume_ckpt, env=vec_env, tensorboard_log=tb_log)
+        print(f"[resume] continuing from {resume_ckpt} at {model.num_timesteps:,} steps")
+    elif init_from:
         model = AlgoCls.load(init_from, env=vec_env, tensorboard_log=tb_log)
     else:
         model = AlgoCls(POLICY_NAME, vec_env, policy_kwargs=policy_kwargs, tensorboard_log=tb_log, verbose=1, seed=seed, **ppo_kwargs)
 
     callbacks = [
+        # Colab sessions like to die mid-run - without periodic checkpoints everything
+        # is lost, because final_model.zip is only written after learn() completes.
+        # Rotating: only the newest checkpoint survives (new file fully written first).
+        RotatingCheckpointCallback(
+            run_dir / "checkpoints",
+            every_steps=cfg.get("checkpoint_every_steps", 100_000),
+            keep=cfg.get("checkpoint_keep", 1),
+            verbose=1,
+        ),
         CurriculumCallback(manager, obs_cfg, verbose=1),
         MetricsLoggingCallback(run_dir / "metrics"),
         MilestoneReportCallback(run_dir / "metrics" / "metrics.csv", run_dir / "reports", run_config=cfg, league=league),
@@ -187,11 +215,31 @@ def run_training(
             )
         )
 
+    video_every = cfg.get("video_every_steps", 500_000)
+    if video_every:
+        # one deterministic episode per interval, rendered headlessly to MP4 - the
+        # training envs themselves never render (video_every_steps: 0 disables this)
+        def _make_video_env() -> CurveEnv:
+            return CurveEnv(manager.make_factory(obs_cfg, rng_seed=int(time.time())), config=env_config)
+
+        callbacks.append(
+            VideoCallback(
+                _make_video_env,
+                run_dir / "videos",
+                every_steps=video_every,
+                max_ticks=int(cfg.get("video_seconds", 30) * 60),
+                fps=60,
+                verbose=1,
+            )
+        )
+
     total_timesteps = timesteps_override or cfg["total_timesteps"]
     # progress_bar=True: rollout collection can be quiet for a while on a CPU-constrained
     # runtime (SB3 only logs metrics once per full rollout, i.e. every n_steps * n_envs
     # steps) - a live bar makes clear it's working rather than looking hung.
-    model.learn(total_timesteps=total_timesteps, callback=CallbackList(callbacks), progress_bar=True)
+    model.learn(
+        total_timesteps=total_timesteps, callback=CallbackList(callbacks), progress_bar=True, reset_num_timesteps=not resumed
+    )
 
     final_path = run_dir / "final_model.zip"
     model.save(str(final_path))
@@ -203,6 +251,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train an Achtung-die-Kurve PPO agent for one curriculum phase.")
     parser.add_argument("--config", required=True, help="path to a phaseN.yaml config")
     parser.add_argument("--init-from", default=None, help="warm-start from a previous phase's final_model.zip")
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="'auto' = continue this run from its newest rotating checkpoint (if any); or an explicit checkpoint path",
+    )
     parser.add_argument("--run-root", default="ai/runs")
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--timesteps", type=int, default=None, help="override total_timesteps from the config (e.g. for a quick smoke test)")
@@ -211,6 +264,7 @@ def main() -> None:
     run_training(
         args.config,
         init_from=args.init_from,
+        resume=args.resume,
         run_root=args.run_root,
         run_name=args.run_name,
         timesteps_override=args.timesteps,

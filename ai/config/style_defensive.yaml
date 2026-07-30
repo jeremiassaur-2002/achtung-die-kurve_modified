@@ -1,0 +1,64 @@
+# Stil-Feintuning "defensiv" - ab dem Phase-3-Modell starten:
+#   python -m ai.training.train --config ai/config/style_defensive.yaml \
+#       --init-from <run-root>/phase3/final_model.zip --run-root ... --run-name style_defensive
+# Gleiche Architektur/Observation wie Phase 3; NUR die Reward-Gewichte verschieben den
+# Stil: Ueberleben und Platzierung zahlen viel, Kills fast nichts. Die
+# Taktiken selbst ("in die Wand draengen", Luecken schneiden) entstehen daraus - sie
+# werden nicht einzeln belohnt, weil ihre Erkennung unscharf und ausnutzbar waere.
+phase: 3
+description: "Style fine-tune: defensive - outlast everyone, keep distance."
+
+total_timesteps: 2000000
+n_envs: 8
+use_subprocess: true
+seed: 0
+
+engine_resolution: 256
+obs_resolution: 96
+frame_stack: 4
+max_episode_ticks: 3600
+
+use_action_masking: false
+action_mask_horizon: 3
+cnn_arch: medium
+
+ppo:
+  learning_rate: 0.0001   # fine-tune: kleiner als beim Basistraining
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+reward:
+  alive_bonus: 0.02       # Ueberleben ist der Hauptertrag ...
+  death_penalty: -1.0
+  kill_bonus: 0.1         # ... Kills sind Beifang, kein Ziel
+  win_bonus: 2.0
+  placement_scale: 0.5
+  clearance_weight: 0.05  # Abstand halten wird sanft belohnt
+  terminate_doomed_border: true
+
+curriculum:
+  blend_window_episodes: 150
+  rolling_window: 300
+  pool_variants: 8
+  stages:
+    - name: style
+      n_opponents: 3
+      opponent_mix: ["self_play", "self_play", "rule_based:hard"]
+      items_enabled: false
+      win_rate_threshold: 1.1
+      min_episodes: 999999999
+
+enable_league: false
+enable_self_play_snapshots: true
+self_play_snapshot_every_steps: 50000
+self_play_max_snapshots: 10
+
+checkpoint_every_steps: 100000
+checkpoint_keep: 1
+video_every_steps: 500000
+video_seconds: 30

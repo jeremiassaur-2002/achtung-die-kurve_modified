@@ -114,6 +114,7 @@ class CurveEngine:
         self.rng = random.Random()
         self.tick = 0
         self.grid: np.ndarray = np.zeros((constants.engine_resolution, constants.engine_resolution), dtype=np.uint8)
+        self.stamp: np.ndarray = np.full_like(self.grid, -(10**9), dtype=np.int32)  # tick each pixel was drawn
         self.players: dict[str, PlayerState] = {}
         self.items_on_screen: list[ItemOnScreen] = []
         self.enabled_items: set[str] = set(gc.ALL_ITEMS)
@@ -133,6 +134,7 @@ class CurveEngine:
         self.tick = 0
         s = self.c.engine_resolution
         self.grid = np.zeros((s, s), dtype=np.uint8)
+        self.stamp = np.full((s, s), -(10**9), dtype=np.int32)
         self.items_on_screen = []
         self.enabled_items = set(enabled_items) if enabled_items is not None else set(gc.ALL_ITEMS)
         self.sides = 0
@@ -232,10 +234,11 @@ class CurveEngine:
         # 6) draw trail segment into the owner-id grid
         if not p.bridge and p.invisible == 0:
             width = max(1, round(c.player_size * p.size))
-            img = Image.fromarray(self.grid)  # (H, W) uint8 -> PIL infers "L" without a mode= arg
-            draw = ImageDraw.Draw(img)
-            draw.line([(prevprev_x, prevprev_y), (p.x, p.y)], fill=p.slot, width=width)
-            self.grid = np.array(img)  # copy, not asarray - PIL may hand back a read-only view
+            mask_img = Image.new("L", (self.grid.shape[1], self.grid.shape[0]), 0)
+            ImageDraw.Draw(mask_img).line([(prevprev_x, prevprev_y), (p.x, p.y)], fill=255, width=width)
+            mask = np.asarray(mask_img) > 0
+            self.grid[mask] = p.slot
+            self.stamp[mask] = self.tick
 
         # 7) item pickup - front/left/right sample points only (not front2), using the NEW dir
         front_dist = c.hitbox_size * p.size
@@ -271,6 +274,8 @@ class CurveEngine:
                     continue
                 if owner == p.slot and p.ghost != 0:
                     continue  # g_ghost: immune to your own trail specifically
+                if owner == p.slot and self._own_trail_is_fresh(p, sx, sy):
+                    continue  # just-drawn own tail: canvas antialiasing makes these px non-lethal in the JS game
                 cause = "self" if owner == p.slot else self._name_for_slot(owner)
                 self._kill(p, cause)
                 return PlayerTickInfo(alive=False, just_died=True, death_cause=p.death_cause, items_collected=collected)
@@ -278,6 +283,16 @@ class CurveEngine:
         return PlayerTickInfo(alive=True, just_died=False, death_cause=None, items_collected=collected)
 
     # --------------------------------------------------------------- helpers
+
+    def _own_trail_is_fresh(self, p, x: float, y: float) -> bool:
+        ix, iy = round(x), round(y)
+        s = self.c.engine_resolution
+        if ix < 0 or iy < 0 or ix >= s or iy >= s:
+            return False
+        mv = max(1e-6, self.c.move_speed * p.speed)
+        clearance = self.c.hitbox_size * p.size + self.c.player_size * p.size / 2 + 2.0
+        grace_ticks = math.ceil(clearance / mv)
+        return (self.tick - int(self.stamp[iy, ix])) <= grace_ticks
 
     def grid_at(self, x: float, y: float) -> int:
         s = self.c.engine_resolution

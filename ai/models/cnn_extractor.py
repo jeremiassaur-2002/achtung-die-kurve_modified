@@ -123,7 +123,10 @@ class CurveFeaturesExtractor(BaseFeaturesExtractor):
         )
 
     def forward(self, observations: dict[str, th.Tensor]) -> th.Tensor:
-        image = observations["image"].float() / 255.0
+        # NOTE: SB3's preprocess_obs() has already divided the uint8 image by 255
+        # (is_image_space() matches our (12,96,96) uint8 Box). Dividing again here
+        # squashed inputs into [0, 1/255] and left the CNN effectively blind.
+        image = observations["image"].float()
         cnn_out = self.cnn(image)
         vector_out = self.vector_mlp(observations["vector"].float())
         return th.cat([cnn_out, vector_out], dim=1)
