@@ -26,7 +26,8 @@ from ai.config import game_constants as gc
 from ai.config.game_constants import GameConstants
 from ai.env import renderer
 from ai.env.engine import CurveEngine, STRAIGHT, TURN_LEFT, TURN_RIGHT, _mcos, _msin
-from ai.env.observation import ObsConfig, ObservationBuilder, VECTOR_DIM
+from ai.env import sensors
+from ai.env.observation import ObsConfig, ObservationBuilder, vector_dim
 from ai.env.opponents import Controller, EpisodeConfig
 
 _ACTIONS = (TURN_LEFT, STRAIGHT, TURN_RIGHT)
@@ -64,6 +65,28 @@ class RewardConfig:
     # actually caused it, which is exactly where PPO's credit assignment needs it.
     terminate_doomed_border: bool = False
 
+    # --- lookahead: arc-based shaping + doomed termination (sensors.py) ---
+    # phi_h = max survival ticks over the three pure strategies (hold-L/S/hold-R,
+    # capped at obs.arc_horizon) / arc_horizon. As a potential this pays for
+    # steering that keeps the best escape time high - i.e. it punishes flying
+    # toward a pocket LONG before the crash, continuously, which is the
+    # anticipatory signal alive_bonus/death_penalty alone cannot provide.
+    # Potential-based, so the optimal policy is untouched (Ng et al. 1999).
+    horizon_weight: float = 0.0
+
+    # ends the episode (with death_penalty) when ALL THREE pure strategies die
+    # within doom_horizon ticks. Unlike terminate_doomed_border this also covers
+    # the dominant Phase-1 failure - spiraling into your own trail. It is not a
+    # geometric proof (a mixed L/S/R sequence could in principle thread a gap the
+    # three pure arcs all miss), but over a short doom_horizon the reachable
+    # paths are tightly sandwiched between the pure arcs, and the arcs are
+    # center-point sampled (optimistic), so in practice a flagged state is lost -
+    # ai/tests/test_sensors.py backs that with a randomized escape search.
+    # Leave this OFF whenever items are enabled: b_clear/g_ghost/b_sides pickups
+    # can rescue a geometrically doomed state.
+    terminate_doomed_any: bool = False
+    doom_horizon: int = 12
+
 
 @dataclass
 class CurveEnvConfig:
@@ -97,7 +120,7 @@ class CurveEnv(gym.Env):
                 "image": spaces.Box(low=0, high=255, shape=self.config.obs.image_shape, dtype=np.uint8),
                 # every component of _build_vector (observation.py) is normalized/flag-like
                 # and stays within [-1, 1]; a finite bound avoids gymnasium's "-inf/inf Box" warning
-                "vector": spaces.Box(low=-10.0, high=10.0, shape=(VECTOR_DIM,), dtype=np.float32),
+                "vector": spaces.Box(low=-10.0, high=10.0, shape=(vector_dim(self.config.obs),), dtype=np.float32),
             }
         )
 
@@ -107,6 +130,7 @@ class CurveEnv(gym.Env):
         self._last_frame: np.ndarray | None = None
         self._tick_in_episode = 0
         self._prev_phi: float | None = None
+        self._prev_phi_h: float | None = None
 
     # ------------------------------------------------------------ reconfigure
 
@@ -143,6 +167,7 @@ class CurveEnv(gym.Env):
         self.engine.reset(active_names, enabled_items=self.config.enabled_items, seed=episode_seed)
         self._tick_in_episode = 0
         self._prev_phi = self._clearance_phi() if self.config.reward.clearance_weight != 0.0 else None
+        self._prev_phi_h = self._horizon_phi() if self.config.reward.horizon_weight != 0.0 else None
 
         self._hero_builder.reset()
         for seat_name, ctrl in self._opponents.items():
@@ -204,11 +229,26 @@ class CurveEnv(gym.Env):
                     reward += r.placement_scale * (dead_before / total_opponents)
                 info["death_cause"] = "border_doomed"  # shows up separately in the metrics breakdown
 
+        if not terminated and hero_info.alive and r.terminate_doomed_any:
+            best_ttc = int(sensors.arc_survival_ticks(self.engine, self._hero_name, self.config.obs.arc_horizon).max())
+            if best_ttc <= r.doom_horizon:
+                terminated = True
+                reward += r.death_penalty
+                total_opponents = len(self._opponents)
+                if total_opponents > 0:
+                    dead_before = sum(1 for name in self._opponents if not self.engine.players[name].alive)
+                    reward += r.placement_scale * (dead_before / total_opponents)
+                info["death_cause"] = "doomed"  # certain death <= doom_horizon ticks away, all three strategies
+
         if self._prev_phi is not None:
             # potential-based shaping; phi(terminal) := 0 is the standard PBRS convention
             new_phi = 0.0 if terminated else self._clearance_phi()
             reward += r.clearance_weight * (r.shaping_gamma * new_phi - self._prev_phi)
             self._prev_phi = new_phi
+        if self._prev_phi_h is not None:
+            new_phi_h = 0.0 if terminated else self._horizon_phi()
+            reward += r.horizon_weight * (r.shaping_gamma * new_phi_h - self._prev_phi_h)
+            self._prev_phi_h = new_phi_h
 
         truncated = self._tick_in_episode >= self.config.max_episode_ticks and not terminated
         if terminated or truncated:
@@ -225,6 +265,14 @@ class CurveEnv(gym.Env):
         return self._last_frame
 
     # ----------------------------------------------------- shaping / doom check
+
+    def _horizon_phi(self) -> float:
+        """Best escape time in [0, 1]: max over hold-LEFT/STRAIGHT/hold-RIGHT of the
+        simulated survival ticks, normalized by obs.arc_horizon. Memoized per tick
+        inside sensors, so the observation vector, the doom check and this phi all
+        share one arc simulation."""
+        ttc = sensors.arc_survival_ticks(self.engine, self._hero_name, self.config.obs.arc_horizon)
+        return float(ttc.max()) / float(self.config.obs.arc_horizon)
 
     def _clearance_phi(self) -> float:
         """Normalized distance in [0, 1] from the hero to the nearest lethal thing:
@@ -314,7 +362,7 @@ class CurveEnv(gym.Env):
         wrap = e.sides != 0 or p.side != 0
 
         sx, sy, sd = p.x, p.y, p.dir
-        for _ in range(self.config.action_mask_horizon):
+        for t in range(1, self.config.action_mask_horizon + 1):
             sd += delta * step
             sx += _mcos(sd) * mv
             sy += _msin(sd) * mv
@@ -323,6 +371,11 @@ class CurveEnv(gym.Env):
                 sy %= s
             elif sx < b or sx > s - b or sy < b or sy > s - b:
                 return False
-            if e.grid_at(sx, sy) != 0 and not (p.ghost != 0 and e.grid_at(sx, sy) == p.slot):
+            owner = e.grid_at(sx, sy)
+            if owner != 0:
+                if owner == p.slot and (p.ghost != 0 or e._own_trail_is_fresh(p, sx, sy, future_ticks=t)):
+                    continue  # own fresh tail is non-lethal (same rule as the engine) -
+                    # without this, hard turns mask themselves off against the segment
+                    # drawn THIS tick and the mask lies about certain death
                 return False
         return True

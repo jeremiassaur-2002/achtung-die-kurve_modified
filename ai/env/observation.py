@@ -15,20 +15,33 @@ from dataclasses import dataclass
 import numpy as np
 
 from ai.config import game_constants as gc
-from ai.env import renderer
+from ai.env import renderer, sensors
 from ai.env.engine import CurveEngine
 
 # vector layout: [speed, size, cos(dir), sin(dir), x_norm, y_norm, wall_dist_norm,
 #   reverse?, invisible?, side?, ghost?, freeze?, sine?, alive_opponents_frac,
 #   field_inset_norm, sides_active?] + one-hot(which color slot is "mine")
+#   + n_rays heading-relative lidar distances (sensors.ray_distances)
+#   + 3 arc survival times for hold-LEFT / STRAIGHT / hold-RIGHT (sensors.
+#     arc_survival_ticks / arc_horizon) - the explicit "if I keep doing X, I die
+#     in t ticks" lookahead the downscaled CNN image cannot resolve near the head
 VECTOR_BASE_DIM = 16
-VECTOR_DIM = VECTOR_BASE_DIM + gc.MAX_PLAYERS
+
+
+def vector_dim(cfg: "ObsConfig") -> int:
+    return VECTOR_BASE_DIM + gc.MAX_PLAYERS + cfg.n_rays + 3
 
 
 @dataclass
 class ObsConfig:
     obs_resolution: int = 96
     frame_stack: int = 4
+    # sensor features appended to the vector (see module docstring / sensors.py);
+    # n_rays = 0 disables rays, arc_horizon must stay > 0 (the env's doomed check
+    # and horizon shaping read the same three values)
+    n_rays: int = 16
+    ray_range_px: float = 64.0
+    arc_horizon: int = 45
 
     @property
     def image_shape(self) -> tuple[int, int, int]:
@@ -55,11 +68,11 @@ class ObservationBuilder:
         else:
             self._frames.append(chw)
         image = np.concatenate(list(self._frames), axis=0)
-        vector = _build_vector(engine, name)
+        vector = _build_vector(engine, name, self.cfg)
         return {"image": image, "vector": vector}
 
 
-def _build_vector(engine: CurveEngine, name: str) -> np.ndarray:
+def _build_vector(engine: CurveEngine, name: str, cfg: ObsConfig) -> np.ndarray:
     p = engine.players[name]
     s = engine.c.engine_resolution
     half = s / 2.0
@@ -95,4 +108,11 @@ def _build_vector(engine: CurveEngine, name: str) -> np.ndarray:
     # and is what the CNN can learn to associate with its own trail's color.
     self_onehot = np.zeros(gc.MAX_PLAYERS, dtype=np.float32)
     self_onehot[gc.PLAYER_NAMES.index(p.name)] = 1.0
-    return np.concatenate([base, self_onehot])
+
+    rays = (
+        sensors.ray_distances(engine, name, cfg.n_rays, cfg.ray_range_px)
+        if cfg.n_rays > 0
+        else np.zeros(0, dtype=np.float32)
+    )
+    ttc = sensors.arc_survival_ticks(engine, name, cfg.arc_horizon).astype(np.float32) / cfg.arc_horizon
+    return np.concatenate([base, self_onehot, rays, ttc])

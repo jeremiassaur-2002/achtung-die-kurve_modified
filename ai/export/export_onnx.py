@@ -18,7 +18,7 @@ from pathlib import Path
 import torch as th
 import torch.nn as nn
 
-from ai.env.observation import VECTOR_DIM, ObsConfig
+from ai.env.observation import ObsConfig, vector_dim
 
 
 class _PolicyLogitsWrapper(nn.Module):
@@ -54,7 +54,7 @@ def export_onnx(model_path: str, out_path: str, obs_cfg: ObsConfig | None = None
     wrapper = _PolicyLogitsWrapper(policy)
 
     dummy_image = th.zeros((1, *obs_cfg.image_shape), dtype=th.uint8)
-    dummy_vector = th.zeros((1, VECTOR_DIM), dtype=th.float32)
+    dummy_vector = th.zeros((1, vector_dim(obs_cfg)), dtype=th.float32)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

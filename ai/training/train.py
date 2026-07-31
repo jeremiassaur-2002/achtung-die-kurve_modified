@@ -98,7 +98,13 @@ def run_training(
 
     set_random_seed(seed)
 
-    obs_cfg = ObsConfig(obs_resolution=cfg["obs_resolution"], frame_stack=cfg["frame_stack"])
+    obs_cfg = ObsConfig(
+        obs_resolution=cfg["obs_resolution"],
+        frame_stack=cfg["frame_stack"],
+        n_rays=cfg.get("n_rays", 16),
+        ray_range_px=cfg.get("ray_range_px", 64.0),
+        arc_horizon=cfg.get("arc_horizon", 45),
+    )
     reward_cfg = RewardConfig(**cfg.get("reward", {}))
     env_config = CurveEnvConfig(
         engine_resolution=cfg["engine_resolution"],
@@ -165,7 +171,17 @@ def run_training(
     resumed = resume_ckpt is not None
 
     if resumed:
-        model = AlgoCls.load(resume_ckpt, env=vec_env, tensorboard_log=tb_log)
+        try:
+            model = AlgoCls.load(resume_ckpt, env=vec_env, tensorboard_log=tb_log)
+        except ValueError as e:
+            # almost always: the checkpoint was trained with a different observation
+            # layout (e.g. before the sensor features existed) and cannot continue
+            # against the new spaces - the fix is a fresh run, not a resume
+            raise SystemExit(
+                f"[resume] {resume_ckpt} does not match the current observation space ({e}). "
+                f"Old checkpoints (pre-sensor-update) cannot be resumed - use a NEW "
+                f"--run-name (or delete the old run's checkpoints/ folder) to start fresh."
+            ) from e
         print(f"[resume] continuing from {resume_ckpt} at {model.num_timesteps:,} steps")
     elif init_from:
         model = AlgoCls.load(init_from, env=vec_env, tensorboard_log=tb_log)

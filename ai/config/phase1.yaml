@@ -4,7 +4,7 @@
 phase: 1
 description: "Solo survival - wall + self-trail avoidance."
 
-total_timesteps: 2000000
+total_timesteps: 3000000
 n_envs: 8
 use_subprocess: true
 seed: 0
@@ -13,6 +13,17 @@ engine_resolution: 256
 obs_resolution: 96
 frame_stack: 4
 max_episode_ticks: 3600
+
+# lookahead sensors appended to the vector observation (ai/env/sensors.py):
+# 16 heading-relative lidar distances + 3 "survival ticks if I hold LEFT /
+# STRAIGHT / RIGHT" times. The 96px CNN image keeps the global layout, but a 2px
+# trail downsamples to a ~1px line at 30-75% brightness and the head dot is
+# sub-pixel - near-head geometry ("my own line is RIGHT THERE") is exactly what
+# these sensors provide directly. ray_range 64px = ~1 turning circle diameter +
+# margin; arc_horizon 45 ticks = ~1.5x the ticks of a quarter turn.
+n_rays: 16
+ray_range_px: 64.0
+arc_horizon: 45
 
 use_action_masking: false
 action_mask_horizon: 3
@@ -26,7 +37,10 @@ ppo:
   gamma: 0.99
   gae_lambda: 0.95
   clip_range: 0.2
-  ent_coef: 0.01
+  ent_coef: 0.005  # was 0.01: entropy sat at ~0.87-0.95 of ln(3) for 2M steps
+  # (policy near-uniform, deterministic argmax degenerated to a constant turn);
+  # with the sensor features providing crisp signal, less entropy pressure lets
+  # the policy actually commit
 
 reward:
   alive_bonus: 0.01
@@ -46,6 +60,18 @@ reward:
   # end the episode the moment the border is provably unescapable (turning-radius
   # geometry) - moves the death penalty onto the decision that caused it
   terminate_doomed_border: true
+  # second potential (same PBRS math as clearance): phi = best escape time over
+  # hold-L/S/R arcs / arc_horizon. Pays continuously for keeping escape options
+  # open = punishes flying toward certain death LONG before impact. This is the
+  # anticipatory ("wenn ich bis dahin nicht lenke, sterbe ich") training signal.
+  horizon_weight: 0.08
+  # ...and when ALL THREE strategies die within doom_horizon ticks, end the
+  # episode right there with the death penalty. Covers the dominant Phase-1
+  # failure (spiraling into the own trail), which terminate_doomed_border cannot
+  # see. Keep OFF in item phases - b_clear/g_ghost/b_sides pickups can rescue a
+  # doomed state.
+  terminate_doomed_any: true
+  doom_horizon: 12
 
 curriculum:
   blend_window_episodes: 50

@@ -284,15 +284,21 @@ class CurveEngine:
 
     # --------------------------------------------------------------- helpers
 
-    def _own_trail_is_fresh(self, p, x: float, y: float) -> bool:
+    def self_grace_ticks(self, p) -> int:
+        """How many ticks a freshly-drawn own-trail pixel stays non-lethal for its
+        owner. Single source of truth - the collision check, the action mask and
+        ai/env/sensors.py all use this same rule (sensors additionally evaluate it
+        at the FUTURE tick an arc reaches the pixel)."""
+        mv = max(1e-6, self.c.move_speed * p.speed)
+        clearance = self.c.hitbox_size * p.size + self.c.player_size * p.size / 2 + 2.0
+        return math.ceil(clearance / mv)
+
+    def _own_trail_is_fresh(self, p, x: float, y: float, future_ticks: int = 0) -> bool:
         ix, iy = round(x), round(y)
         s = self.c.engine_resolution
         if ix < 0 or iy < 0 or ix >= s or iy >= s:
             return False
-        mv = max(1e-6, self.c.move_speed * p.speed)
-        clearance = self.c.hitbox_size * p.size + self.c.player_size * p.size / 2 + 2.0
-        grace_ticks = math.ceil(clearance / mv)
-        return (self.tick - int(self.stamp[iy, ix])) <= grace_ticks
+        return (self.tick + future_ticks - int(self.stamp[iy, ix])) <= self.self_grace_ticks(p)
 
     def grid_at(self, x: float, y: float) -> int:
         s = self.c.engine_resolution
