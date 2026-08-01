@@ -2,7 +2,7 @@
 # possible. No opponents, no items, no win condition (see curve_env.py: episodes
 # with zero opponents only end on death/truncation, never on "alive_count<=1").
 phase: 1
-description: "Solo survival - wall + self-trail avoidance."
+description: "Solo survival mit LSTM-Gedächtnis (RecurrentPPO)."
 
 total_timesteps: 3000000
 n_envs: 8
@@ -17,7 +17,7 @@ seed: 0
 #  - Empfohlener Kickstart VOR dem RL-Training (überspringt die Zufalls-Crash-Phase):
 #      python -m ai.training.bc_pretrain --config ai/config/phase1.yaml --out ai/runs/bc/bc_phase1.zip
 #      python -m ai.training.train --config ai/config/phase1.yaml --init-from ai/runs/bc/bc_phase1.zip
-algo: ppo
+algo: recurrent_ppo
 
 engine_resolution: 256
 # obs_resolution ist der CNN-Input, NICHT die Physik (die läuft immer auf
@@ -27,7 +27,7 @@ engine_resolution: 256
 # billig liefern. Der Regler existiert bewusst: wer es testen will, setzt hier
 # 128/192/256 und cnn_arch: medium - Checkpoints sind dann inkompatibel (neuer Run).
 obs_resolution: 96
-frame_stack: 4
+frame_stack: 2   # das LSTM übernimmt die Zeitachse; 2 Frames reichen für Momentanbewegung
 max_episode_ticks: 3600
 
 # lookahead sensors appended to the vector observation (ai/env/sensors.py):
@@ -45,11 +45,14 @@ use_action_masking: false
 action_mask_horizon: 3
 cnn_arch: small
 
+# RecurrentPPO liest denselben ppo:-Block; BPTT macht Updates teurer, deshalb
+# kürzere Rollouts und weniger Epochen. batch_size muss n_steps*n_envs teilen
+# (SB3 batched hier ganze Sequenzen).
 ppo:
   learning_rate: 0.0003
-  n_steps: 512
+  n_steps: 256
   batch_size: 256
-  n_epochs: 10
+  n_epochs: 6
   gamma: 0.99
   gae_lambda: 0.95
   clip_range: 0.2
@@ -137,3 +140,9 @@ best_check_every_steps: 10000
 # ihren 2000er-Abstand, neue kommen dichter - die Charts tragen ohnehin Schritte
 # auf der x-Achse.
 metrics_log_every_steps: 500
+
+# LSTM-Größe (MultiInputLstmPolicy): 128 ist für die 320-dim Feature-Ausgabe des
+# Extractors (256 CNN + 64 Vektor) ein solider Start.
+lstm:
+  lstm_hidden_size: 128
+  n_lstm_layers: 1

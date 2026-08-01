@@ -2,10 +2,10 @@
 # possible. No opponents, no items, no win condition (see curve_env.py: episodes
 # with zero opponents only end on death/truncation, never on "alive_count<=1").
 phase: 1
-description: "Solo survival - wall + self-trail avoidance."
+description: "Solo survival, off-policy (QR-DQN mit Replay-Buffer)."
 
 total_timesteps: 3000000
-n_envs: 8
+n_envs: 4   # off-policy braucht keine breiten Rollouts; 4 Sammler genügen
 use_subprocess: true
 seed: 0
 
@@ -17,7 +17,7 @@ seed: 0
 #  - Empfohlener Kickstart VOR dem RL-Training (überspringt die Zufalls-Crash-Phase):
 #      python -m ai.training.bc_pretrain --config ai/config/phase1.yaml --out ai/runs/bc/bc_phase1.zip
 #      python -m ai.training.train --config ai/config/phase1.yaml --init-from ai/runs/bc/bc_phase1.zip
-algo: ppo
+algo: qrdqn
 
 engine_resolution: 256
 # obs_resolution ist der CNN-Input, NICHT die Physik (die läuft immer auf
@@ -46,17 +46,22 @@ action_mask_horizon: 3
 cnn_arch: small
 
 ppo:
-  learning_rate: 0.0003
-  n_steps: 512
-  batch_size: 256
-  n_epochs: 10
-  gamma: 0.99
-  gae_lambda: 0.95
-  clip_range: 0.2
-  ent_coef: 0.005  # was 0.01: entropy sat at ~0.87-0.95 of ln(3) for 2M steps
-  # (policy near-uniform, deterministic argmax degenerated to a constant turn);
-  # with the sensor features providing crisp signal, less entropy pressure lets
-  # the policy actually commit
+  gamma: 0.99   # von qrdqn übernommen; MUSS zu reward.shaping_gamma passen
+
+# QR-DQN-Hyperparameter. WICHTIG: buffer_size ist ein RAM-Regler - der Buffer
+# hält obs UND next_obs als rohe uint8-Frame-Stacks (12x96x96 = ~110 KB, also
+# ~221 KB je Transition). 20000 ~= 4.4 GB. build_algo_kwargs druckt die
+# Schätzung beim Start. Exploration läuft über epsilon-greedy statt Entropie.
+qrdqn:
+  learning_rate: 0.0001
+  buffer_size: 20000
+  learning_starts: 5000
+  batch_size: 64
+  train_freq: 4
+  gradient_steps: 1
+  target_update_interval: 2000
+  exploration_fraction: 0.2
+  exploration_final_eps: 0.05
 
 reward:
   alive_bonus: 0.01

@@ -132,6 +132,14 @@ class CurveEnv(gym.Env):
         self._prev_phi: float | None = None
         self._prev_phi_h: float | None = None
 
+    @property
+    def hero_name(self) -> str:
+        """The seat SB3 is training this episode (assigned in reset()). Public so
+        tools driving the hero externally - bc_pretrain's rule-based teacher, video
+        probes - don't need to poke at _hero_name."""
+        assert self._hero_name is not None, "call reset() before hero_name"
+        return self._hero_name
+
     # ------------------------------------------------------------ reconfigure
 
     def set_opponent_factory(self, fn: OpponentFactory) -> None:

@@ -76,27 +76,30 @@ class FrozenPolicyController(Controller):
     """
 
     def __init__(self, model_path: str, obs_cfg: ObsConfig, deterministic: bool = False, device: str = "cpu"):
-        from stable_baselines3.common.base_class import BaseAlgorithm
-        from stable_baselines3 import PPO
+        from ai.models.algo import load_trained
 
-        try:
-            self._model: BaseAlgorithm = PPO.load(model_path, device=device)
-        except Exception:
-            from sb3_contrib import MaskablePPO
-
-            self._model = MaskablePPO.load(model_path, device=device)
+        self._model = load_trained(model_path, device=device)
         self.obs_cfg = obs_cfg
         self.deterministic = deterministic
         self._builder: ObservationBuilder | None = None
+        # RecurrentPPO-Snapshots brauchen ihren LSTM-Zustand über die Episode hinweg;
+        # PPO/MaskablePPO/QRDQN ignorieren state/episode_start schlicht.
+        self._state = None
+        self._episode_start = np.ones((1,), dtype=bool)
 
     def reset(self, seat_name: str) -> None:
         self._builder = ObservationBuilder(self.obs_cfg)
+        self._state = None
+        self._episode_start = np.ones((1,), dtype=bool)
 
     def act(self, engine: CurveEngine, name: str, frame_hwc: np.ndarray | None) -> int:
         assert self._builder is not None, "call reset() before act()"
         obs = self._builder.observe(engine, name, frame_hwc)
         batched = {k: v[np.newaxis, ...] for k, v in obs.items()}
-        action, _ = self._model.predict(batched, deterministic=self.deterministic)
+        action, self._state = self._model.predict(
+            batched, state=self._state, episode_start=self._episode_start, deterministic=self.deterministic
+        )
+        self._episode_start = np.zeros((1,), dtype=bool)
         return int(np.asarray(action).reshape(-1)[0])
 
 

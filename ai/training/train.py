@@ -5,6 +5,10 @@ start from the previous phase's final checkpoint.
 
     python -m ai.training.train --config ai/config/phase1.yaml
     python -m ai.training.train --config ai/config/phase2.yaml --init-from ai/runs/phase1_.../final_model.zip
+
+Warm start via behavior cloning (recommended before Phase 1, see bc_pretrain.py):
+    python -m ai.training.bc_pretrain --config ai/config/phase1.yaml --out ai/runs/bc/bc_model.zip
+    python -m ai.training.train --config ai/config/phase1.yaml --init-from ai/runs/bc/bc_model.zip
 """
 
 from __future__ import annotations
@@ -25,7 +29,8 @@ from ai.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
 from ai.env.observation import ObsConfig
 from ai.env.opponents import OpponentSpec
 from ai.env.vec_factory import build_vec_env
-from ai.models.policy import POLICY_NAME, build_policy_kwargs
+from ai.models.algo import build_algo_kwargs, load_trained, resolve_algo
+from ai.models.policy import build_policy_kwargs
 from ai.training.callbacks import (
     CurriculumCallback,
     EvalEloCallback,
@@ -43,6 +48,31 @@ from ai.training.self_play import SelfPlayPool
 
 def load_config(path: str | Path) -> dict:
     return yaml.safe_load(Path(path).read_text())
+
+
+def make_configs(cfg: dict) -> tuple[ObsConfig, CurveEnvConfig]:
+    """Observation + env config exactly as training builds them - shared with
+    ai/training/bc_pretrain.py so behavior-cloning data goes through the IDENTICAL
+    observation pipeline (frame stack, sensors, reward semantics) the RL fine-tune
+    will later see. Any drift between the two would poison the warm start."""
+    obs_cfg = ObsConfig(
+        obs_resolution=cfg["obs_resolution"],
+        frame_stack=cfg["frame_stack"],
+        n_rays=cfg.get("n_rays", 16),
+        ray_range_px=cfg.get("ray_range_px", 64.0),
+        arc_horizon=cfg.get("arc_horizon", 45),
+    )
+    reward_cfg = RewardConfig(**cfg.get("reward", {}))
+    env_config = CurveEnvConfig(
+        engine_resolution=cfg["engine_resolution"],
+        obs=obs_cfg,
+        enabled_items=set(),
+        use_action_masking=cfg.get("use_action_masking", False),
+        action_mask_horizon=cfg.get("action_mask_horizon", 3),
+        max_episode_ticks=cfg.get("max_episode_ticks", 3600),
+        reward=reward_cfg,
+    )
+    return obs_cfg, env_config
 
 
 def _resolve_token(token: str, rng: random.Random, self_play_pool: SelfPlayPool | None, league: League | None) -> OpponentSpec:
@@ -99,23 +129,7 @@ def run_training(
 
     set_random_seed(seed)
 
-    obs_cfg = ObsConfig(
-        obs_resolution=cfg["obs_resolution"],
-        frame_stack=cfg["frame_stack"],
-        n_rays=cfg.get("n_rays", 16),
-        ray_range_px=cfg.get("ray_range_px", 64.0),
-        arc_horizon=cfg.get("arc_horizon", 45),
-    )
-    reward_cfg = RewardConfig(**cfg.get("reward", {}))
-    env_config = CurveEnvConfig(
-        engine_resolution=cfg["engine_resolution"],
-        obs=obs_cfg,
-        enabled_items=set(),
-        use_action_masking=cfg.get("use_action_masking", False),
-        action_mask_horizon=cfg.get("action_mask_horizon", 3),
-        max_episode_ticks=cfg.get("max_episode_ticks", 3600),
-        reward=reward_cfg,
-    )
+    obs_cfg, env_config = make_configs(cfg)
     constants = GameConstants(cfg["engine_resolution"])
 
     self_play_pool = None
@@ -146,17 +160,21 @@ def run_training(
         monitor_dir=str(run_dir / "monitor"),
     )
 
-    use_masking = cfg.get("use_action_masking", False)
-    if use_masking:
-        from sb3_contrib import MaskablePPO as AlgoCls
-    else:
-        from stable_baselines3 import PPO as AlgoCls
+    # Algorithmus aus der Config: ppo (Default) | maskable_ppo | recurrent_ppo | qrdqn.
+    # use_action_masking: true erzwingt wie bisher MaskablePPO; die Kombination mit
+    # recurrent_ppo/qrdqn wird in resolve_algo laut abgelehnt statt still ignoriert.
+    spec = resolve_algo(cfg)
+    AlgoCls = spec.cls
 
     tb_dir = run_dir / "tensorboard"
     tb_dir.mkdir(parents=True, exist_ok=True)
     tb_log = str(tb_dir)
-    ppo_kwargs = dict(cfg.get("ppo", {}))
-    policy_kwargs = build_policy_kwargs(cnn_arch=cfg.get("cnn_arch", "small"))
+    algo_kwargs = build_algo_kwargs(cfg, spec, obs_shape_image=obs_cfg.image_shape)
+    policy_kwargs = build_policy_kwargs(
+        cnn_arch=cfg.get("cnn_arch", "small"),
+        algo=spec.name,
+        lstm_kwargs=cfg.get("lstm", None),
+    )
 
     # --resume continues THIS phase's own run (weights + optimizer + step counter,
     # so `total_timesteps` keeps counting where it left off); --init-from only
@@ -173,8 +191,8 @@ def run_training(
 
     if resumed:
         try:
-            model = AlgoCls.load(resume_ckpt, env=vec_env, tensorboard_log=tb_log)
-        except ValueError as e:
+            model = load_trained(resume_ckpt, env=vec_env, tensorboard_log=tb_log)
+        except (ValueError, RuntimeError) as e:
             # almost always: the checkpoint was trained with a different observation
             # layout (e.g. before the sensor features existed) and cannot continue
             # against the new spaces - the fix is a fresh run, not a resume
@@ -183,11 +201,23 @@ def run_training(
                 f"Old checkpoints (pre-sensor-update) cannot be resumed - use a NEW "
                 f"--run-name (or delete the old run's checkpoints/ folder) to start fresh."
             ) from e
+        if not isinstance(model, AlgoCls):
+            raise SystemExit(
+                f"[resume] {resume_ckpt} wurde mit {type(model).__name__} trainiert, die Config verlangt aber "
+                f"algo: {spec.name}. Ein Lauf kann nur mit demselben Algorithmus fortgesetzt werden - entweder "
+                f"die Config zurückstellen oder einen frischen Lauf (--run-name) starten."
+            )
         print(f"[resume] continuing from {resume_ckpt} at {model.num_timesteps:,} steps")
     elif init_from:
-        model = AlgoCls.load(init_from, env=vec_env, tensorboard_log=tb_log)
+        model = load_trained(init_from, env=vec_env, tensorboard_log=tb_log)
+        if not isinstance(model, AlgoCls):
+            raise SystemExit(
+                f"[init-from] {init_from} stammt von {type(model).__name__}, die Config verlangt algo: {spec.name}. "
+                f"Gewichte lassen sich nur innerhalb derselben Algorithmusfamilie übernehmen (BC-Modelle sind PPO - "
+                f"dafür algo: ppo setzen; ein Familienwechsel bedeutet frisches Training)."
+            )
     else:
-        model = AlgoCls(POLICY_NAME, vec_env, policy_kwargs=policy_kwargs, tensorboard_log=tb_log, verbose=1, seed=seed, **ppo_kwargs)
+        model = AlgoCls(spec.policy_name, vec_env, policy_kwargs=policy_kwargs, tensorboard_log=tb_log, verbose=1, seed=seed, **algo_kwargs)
 
     callbacks = [
         # Colab sessions like to die mid-run - without periodic checkpoints everything
@@ -263,6 +293,10 @@ def run_training(
                 every_steps=video_every,
                 max_ticks=int(cfg.get("video_seconds", 30) * 60),
                 fps=60,
+                # 3 = Trails/Border/Dots werden vektoriell in 3x Engine-Auflösung
+                # neu gezeichnet (768px statt klotzigem 512px-Nearest-Neighbor);
+                # 0/None = alter Raster-Upscale-Pfad
+                render_scale=cfg.get("video_render_scale", 3),
                 verbose=1,
             )
         )

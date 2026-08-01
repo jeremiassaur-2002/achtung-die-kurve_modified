@@ -234,11 +234,7 @@ class CurveEngine:
         # 6) draw trail segment into the owner-id grid
         if not p.bridge and p.invisible == 0:
             width = max(1, round(c.player_size * p.size))
-            mask_img = Image.new("L", (self.grid.shape[1], self.grid.shape[0]), 0)
-            ImageDraw.Draw(mask_img).line([(prevprev_x, prevprev_y), (p.x, p.y)], fill=255, width=width)
-            mask = np.asarray(mask_img) > 0
-            self.grid[mask] = p.slot
-            self.stamp[mask] = self.tick
+            self._stamp_segment(p.slot, prevprev_x, prevprev_y, p.x, p.y, width)
 
         # 7) item pickup - front/left/right sample points only (not front2), using the NEW dir
         front_dist = c.hitbox_size * p.size
@@ -283,6 +279,35 @@ class CurveEngine:
         return PlayerTickInfo(alive=True, just_died=False, death_cause=None, items_collected=collected)
 
     # --------------------------------------------------------------- helpers
+
+    def _stamp_segment(self, slot: int, xa: float, ya: float, xb: float, yb: float, width: int) -> None:
+        """Rasterizes one trail segment into grid/stamp - PIXEL-IDENTICAL to the old
+        full-frame approach (Image.new(S,S) + ImageDraw.line + full-grid boolean
+        assignment), but ~60x cheaper: PIL line rasterization is exactly translation-
+        invariant under INTEGER shifts, so drawing the segment into a tiny local
+        bounding-box image (integer-offset, fractional endpoint coords preserved)
+        and blitting that patch produces the same lethal pixels while touching only
+        ~width^2 memory instead of the whole S x S grid per player per tick. Fuzz-
+        verified bit-exact against the old path for every gameplay-scale segment
+        (ai/tests/test_stamp_equivalence.py: 30k segments up to 12px length/width 32;
+        a real segment spans exactly two movement steps, ~1.2px at S=256, up to ~10px
+        under stacked g_fast). Only hypothetical arbitrarily-long segments could flip
+        a single boundary pixel under translation (PIL float edge math) - the engine
+        cannot produce those. The old way rasterized+masked 65k pixels to set ~6,
+        making this the engine's dominant per-player cost in multiplayer."""
+        s_h, s_w = self.grid.shape
+        pad = width + 2  # covers PIL's half-width extent (+ rounding slack) around the endpoints
+        x0 = max(0, math.floor(min(xa, xb)) - pad)
+        y0 = max(0, math.floor(min(ya, yb)) - pad)
+        x1 = min(s_w - 1, math.ceil(max(xa, xb)) + pad)
+        y1 = min(s_h - 1, math.ceil(max(ya, yb)) + pad)
+        if x1 < x0 or y1 < y0:
+            return  # segment lies entirely outside the grid (old path: PIL clipped it to nothing)
+        mask_img = Image.new("L", (x1 - x0 + 1, y1 - y0 + 1), 0)
+        ImageDraw.Draw(mask_img).line([(xa - x0, ya - y0), (xb - x0, yb - y0)], fill=255, width=width)
+        mask = np.asarray(mask_img) > 0
+        self.grid[y0 : y1 + 1, x0 : x1 + 1][mask] = slot
+        self.stamp[y0 : y1 + 1, x0 : x1 + 1][mask] = self.tick
 
     def self_grace_ticks(self, p) -> int:
         """How many ticks a freshly-drawn own-trail pixel stays non-lethal for its

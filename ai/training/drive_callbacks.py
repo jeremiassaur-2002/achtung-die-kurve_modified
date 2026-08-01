@@ -108,6 +108,7 @@ class VideoCallback(BaseCallback):
         every_steps: int = 500_000,
         max_ticks: int = 1800,
         fps: int = 60,
+        render_scale: int | None = 3,
         verbose: int = 0,
     ):
         super().__init__(verbose)
@@ -116,6 +117,7 @@ class VideoCallback(BaseCallback):
         self.every_steps = every_steps
         self.max_ticks = max_ticks
         self.fps = fps
+        self.render_scale = render_scale
         self._last_video = 0
 
     def _init_callback(self) -> None:
@@ -129,12 +131,27 @@ class VideoCallback(BaseCallback):
         try:
             env = self.make_env()
 
+            import numpy as np
+
+            # zustandsbehaftetes predict: RecurrentPPO braucht seinen LSTM-Zustand
+            # über die Episode hinweg (state + episode_start), PPO/MaskablePPO/QRDQN
+            # ignorieren beide Argumente einfach - eine Signatur für alle Algos.
+            lstm_state = {"s": None, "start": np.ones((1,), dtype=bool)}
+
             def predict(obs):
-                action, _ = self.model.predict(obs, deterministic=True)
+                action, lstm_state["s"] = self.model.predict(
+                    obs, state=lstm_state["s"], episode_start=lstm_state["start"], deterministic=True
+                )
+                lstm_state["start"] = np.zeros((1,), dtype=bool)
                 return action
 
             path = record_episode_video(
-                env, predict, self.video_dir / f"step_{self.num_timesteps}.mp4", max_ticks=self.max_ticks, fps=self.fps
+                env,
+                predict,
+                self.video_dir / f"step_{self.num_timesteps}.mp4",
+                max_ticks=self.max_ticks,
+                fps=self.fps,
+                render_scale=self.render_scale,
             )
             if self.verbose:
                 print(f"[video] wrote {path}")
