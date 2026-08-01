@@ -21,7 +21,7 @@ from ai.env.opponents import SpecOpponentFactory
 from ai.training.curriculum import CurriculumManager
 from ai.training.league import League
 
-MILESTONES = (10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000, 10_000_000)
+MILESTONES = (10_000, 50_000, 100_000, 500_000, 1_000_000, 2_000_000, 3_000_000, 5_000_000, 10_000_000)
 
 
 def _finished_episode_infos(infos: list[dict]) -> list[dict]:
@@ -170,23 +170,39 @@ class MetricsLoggingCallback(BaseCallback):
     to CSV + JSON lines, so ai/reporting/plots.py doesn't need TensorBoard's event
     file format to build charts."""
 
+    # feste Ursachen-Spalten für death_causes.csv - Gegnernamen (dynamisch!) werden
+    # auf "opponent" abgebildet, damit das CSV-Schema über alle Phasen stabil bleibt
+    DEATH_CAUSE_COLUMNS = ("border", "self", "opponent", "border_doomed", "doomed", "won", "truncated")
+
     def __init__(self, out_dir: str | Path, log_every_steps: int = 2000, rolling_window: int = 100, verbose: int = 0):
         super().__init__(verbose)
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.csv_path = self.out_dir / "metrics.csv"
         self.jsonl_path = self.out_dir / "metrics.jsonl"
+        # Todesursachen in eine EIGENE Datei: metrics.csv wird bei --resume nur
+        # fortgeschrieben - neue Spalten dort würden alte Kopfzeilen brechen
+        self.death_csv_path = self.out_dir / "death_causes.csv"
         self.log_every_steps = log_every_steps
         self._last_log = 0
         self._ep_rewards: deque[float] = deque(maxlen=rolling_window)
         self._ep_lengths: deque[float] = deque(maxlen=rolling_window)
         self._wins: deque[float] = deque(maxlen=rolling_window)
+        self._death_causes: deque[str] = deque(maxlen=rolling_window)
+
+    @classmethod
+    def _normalize_cause(cls, info: dict) -> str:
+        cause = info.get("death_cause")
+        if cause is None:
+            return "won" if info.get("won") else "truncated"  # Episode endete ohne Tod des Helden
+        return cause if cause in cls.DEATH_CAUSE_COLUMNS else "opponent"
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
         for info in _finished_episode_infos(infos):
             self._ep_lengths.append(info["episode_ticks"])
             self._wins.append(1.0 if info.get("won") else 0.0)
+            self._death_causes.append(self._normalize_cause(info))
             ep = info.get("episode")  # present if envs are wrapped with SB3's Monitor
             if ep is not None:
                 self._ep_rewards.append(ep["r"])
@@ -194,7 +210,20 @@ class MetricsLoggingCallback(BaseCallback):
         if self.num_timesteps - self._last_log >= self.log_every_steps:
             self._last_log = self.num_timesteps
             self._write_row(self._collect_row())
+            if self._death_causes:
+                self._write_death_row()
         return True
+
+    def _write_death_row(self) -> None:
+        n = len(self._death_causes)
+        row = {"step": self.num_timesteps}
+        row.update({cause: sum(1 for c in self._death_causes if c == cause) / n for cause in self.DEATH_CAUSE_COLUMNS})
+        write_header = not self.death_csv_path.exists()
+        with open(self.death_csv_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
 
     def _collect_row(self) -> dict:
         name_to_value = getattr(self.model.logger, "name_to_value", {}) if hasattr(self.model, "logger") else {}
@@ -234,6 +263,14 @@ class MilestoneReportCallback(BaseCallback):
     def _on_step(self) -> bool:
         for milestone in MILESTONES:
             if milestone in self._done or self.num_timesteps < milestone:
+                continue
+            if (self.report_dir / f"milestone_{milestone}" / "report.md").exists():
+                # resume-safe: nach --resume startet _done leer und num_timesteps liegt
+                # sofort über allen alten Meilensteinen - ohne diesen Check würden die
+                # historischen Reports (Charts mit dem damaligen Datenstand!) mit
+                # Voll-Historien-Charts überschrieben. So entstehen nur die wirklich
+                # fehlenden Reports (z. B. frisch zu MILESTONES hinzugefügte Stufen).
+                self._done.add(milestone)
                 continue
             self._done.add(milestone)
             try:

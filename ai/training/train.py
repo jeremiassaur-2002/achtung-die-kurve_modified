@@ -10,6 +10,7 @@ start from the previous phase's final checkpoint.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import random
 import time
 from pathlib import Path
@@ -34,7 +35,7 @@ from ai.training.callbacks import (
     SelfPlaySnapshotCallback,
 )
 from ai.training.curriculum import CurriculumManager, CurriculumStage
-from ai.training.drive_callbacks import RotatingCheckpointCallback, VideoCallback
+from ai.training.drive_callbacks import BestModelCallback, RotatingCheckpointCallback, VideoCallback
 from ai.training.run_persistence import latest_checkpoint
 from ai.training.league import League
 from ai.training.self_play import SelfPlayPool
@@ -199,7 +200,17 @@ def run_training(
             verbose=1,
         ),
         CurriculumCallback(manager, obs_cfg, verbose=1),
-        MetricsLoggingCallback(run_dir / "metrics"),
+        MetricsLoggingCallback(run_dir / "metrics", log_every_steps=cfg.get("metrics_log_every_steps", 2000)),
+        # beste Gewichte des Laufs (siehe drive_callbacks.BestModelCallback) - landet
+        # als <run>/best/best_model.zip auf Drive, unabhängig von der Checkpoint-Rotation
+        BestModelCallback(
+            run_dir / "best",
+            metric=cfg.get("best_metric", "ep_len_mean"),
+            window=cfg.get("best_window_episodes", 100),
+            min_episodes=cfg.get("best_min_episodes", 50),
+            check_every_steps=cfg.get("best_check_every_steps", 10_000),
+            verbose=1,
+        ),
         MilestoneReportCallback(run_dir / "metrics" / "metrics.csv", run_dir / "reports", run_config=cfg, league=league),
     ]
     if self_play_pool is not None:
@@ -236,7 +247,14 @@ def run_training(
         # one deterministic episode per interval, rendered headlessly to MP4 - the
         # training envs themselves never render (video_every_steps: 0 disables this)
         def _make_video_env() -> CurveEnv:
-            return CurveEnv(manager.make_factory(obs_cfg, rng_seed=int(time.time())), config=env_config)
+            # Im Video-Env sind beide Doom-Terminatoren AUS: im Training beenden sie
+            # die Episode bewusst bis zu doom_horizon Ticks VOR dem Aufprall (die
+            # Strafe soll auf der verursachenden Entscheidung liegen) - im Video
+            # sähe das wie ein Tod im freien Raum aus. Hier soll der tatsächliche,
+            # physische Einschlag sichtbar sein. Die Policy selbst ist identisch.
+            video_reward = dataclasses.replace(env_config.reward, terminate_doomed_border=False, terminate_doomed_any=False)
+            video_config = dataclasses.replace(env_config, reward=video_reward)
+            return CurveEnv(manager.make_factory(obs_cfg, rng_seed=int(time.time())), config=video_config)
 
         callbacks.append(
             VideoCallback(

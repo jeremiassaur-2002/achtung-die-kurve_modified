@@ -13,6 +13,7 @@ end up with zero usable checkpoints. With the notebook's Drive-mounted
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -86,16 +87,43 @@ def record_episode_video(env, predict_fn, out_path: str | Path, max_ticks: int =
     frames: list[np.ndarray] = []
     obs, _ = env.reset()
     frames.append(grab())
+    terminated = truncated = False
+    info: dict = {}
+    ticks = 0
     for _ in range(max_ticks):
-        obs, _r, terminated, truncated, _info = env.step(int(predict_fn(obs)))
+        obs, _r, terminated, truncated, info = env.step(int(predict_fn(obs)))
         frames.append(grab())
+        ticks += 1
         if terminated or truncated:
             break
-    for _ in range(int(fps * 0.5)):  # hold the final frame for half a second so the death is visible
-        frames.append(frames[-1])
+
+    # Warum ist das Video zu Ende? Ohne diese Einblendung sieht JEDES Videoende
+    # wie ein Tod aus (eingefrorener letzter Frame) - auch wenn der Agent in
+    # Wahrheit nur das Aufnahme- oder Episodenlimit erreicht hat und weiterlebt.
+    if terminated and info.get("won"):
+        end_reason = "won"  # Phasen mit Gegnern: alle anderen tot, Held lebt
+        caption = f"GEWONNEN  (Tick {ticks})"
+    elif terminated:
+        end_reason = "death"
+        cause = info.get("death_cause", "?")
+        caption = f"GESTORBEN: {cause}  (Tick {ticks})"
+    elif truncated:
+        end_reason = "episode_limit"
+        caption = f"EPISODEN-LIMIT ERREICHT - {ticks} Ticks ueberlebt"
+    else:
+        end_reason = "recording_limit"
+        caption = f"AUFNAHMELIMIT ERREICHT - AGENT LEBT NOCH ({ticks}+ Ticks)"
+
+    end_card = _annotate_frame(frames[-1], caption)
+    for _ in range(int(fps * 1.0)):  # hold the annotated final frame for a second so the outcome is readable
+        frames.append(end_card)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # maschinenlesbares Sidecar (step_X.json neben step_X.mp4): Ende-Grund,
+    # Todesursache und überlebte Ticks - für spätere Auswertung ohne Videoschauen
+    sidecar = {"end_reason": end_reason, "death_cause": info.get("death_cause"), "ticks_survived": ticks, "max_ticks": max_ticks}
+    out_path.with_suffix(".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
     try:
         import imageio.v2 as imageio
 
@@ -109,3 +137,81 @@ def record_episode_video(env, predict_fn, out_path: str | Path, max_ticks: int =
         imgs = [Image.fromarray(f) for f in frames[::2]]
         imgs[0].save(gif_path, save_all=True, append_images=imgs[1:], duration=1000 // 30, loop=0)
         return gif_path
+
+
+def _annotate_frame(frame: "np.ndarray", caption: str) -> "np.ndarray":
+    """Legt unten eine dunkle Leiste mit `caption` über eine Kopie des Frames."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.fromarray(frame.copy())
+    draw = ImageDraw.Draw(img)
+    bar_h = max(24, img.height // 14)
+    draw.rectangle([(0, img.height - bar_h), (img.width, img.height)], fill=(0, 0, 0))
+    try:
+        font = ImageFont.load_default(size=int(bar_h * 0.55))  # Pillow >= 10.1
+    except TypeError:
+        font = ImageFont.load_default()
+    text_w = draw.textlength(caption, font=font)
+    draw.text(((img.width - text_w) / 2, img.height - bar_h + bar_h * 0.2), caption, fill=(255, 255, 0), font=font)
+    return np.asarray(img)
+
+
+# --------------------------------------------------------------- best weights
+
+_BEST_MODEL = "best_model.zip"
+_BEST_META = "best_model.json"
+_BEST_HISTORY = "best_history.csv"
+
+
+class BestTracker:
+    """Hält die BESTEN Gewichte eines Laufs fest, gemessen an einem gleitenden
+    Episoden-Mittelwert (z. B. Überlebenszeit). Anders als die rotierenden
+    Checkpoints (immer der NEUESTE Stand) überlebt hier der beste Stand - wichtig,
+    weil PPO-Läufe zwischenzeitlich einbrechen können: endet das Training in
+    einem Tal, ist best_model.zip trotzdem noch die Spitzen-Policy von früher.
+
+    Resume-sicher: der Bestwert wird aus best_model.json wiedergeladen, ein
+    fortgesetzter Lauf kann den historischen Bestwert also nie mit etwas
+    Schlechterem überschreiben. Torch-frei testbar: `model` braucht nur .save().
+    """
+
+    def __init__(self, best_dir: str | Path, metric: str = "ep_len_mean", min_episodes: int = 50, min_delta: float = 0.0):
+        self.best_dir = Path(best_dir)
+        self.metric = metric
+        self.min_episodes = min_episodes
+        self.min_delta = min_delta
+        self.best_value: float | None = None
+        self.best_step: int | None = None
+        meta_path = self.best_dir / _BEST_META
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            if meta.get("metric") == metric:
+                self.best_value = float(meta["value"])
+                self.best_step = int(meta["step"])
+
+    def maybe_save(self, model, mean_value: float, n_episodes: int, step: int) -> Path | None:
+        """Speichert atomar, wenn `mean_value` (über >= min_episodes Episoden) den
+        Bestwert um mehr als min_delta übertrifft. Gibt den Pfad oder None zurück."""
+        if n_episodes < self.min_episodes:
+            return None  # Burn-in: ein "Bestwert" aus 3 Glücks-Episoden wäre wertlos
+        if self.best_value is not None and mean_value <= self.best_value + self.min_delta:
+            return None
+
+        self.best_dir.mkdir(parents=True, exist_ok=True)
+        final = self.best_dir / _BEST_MODEL
+        tmp = final.with_name(final.name + ".part")
+        model.save(str(tmp))
+        os.replace(tmp, final)  # gleiche Schreibgarantie wie die rotierenden Checkpoints
+
+        self.best_value, self.best_step = float(mean_value), int(step)
+        (self.best_dir / _BEST_META).write_text(
+            json.dumps({"metric": self.metric, "value": self.best_value, "step": self.best_step, "n_episodes": n_episodes}, indent=2),
+            encoding="utf-8",
+        )
+        history = self.best_dir / _BEST_HISTORY
+        write_header = not history.exists()
+        with open(history, "a", encoding="utf-8") as f:
+            if write_header:
+                f.write("step,metric,value,n_episodes\n")
+            f.write(f"{step},{self.metric},{mean_value},{n_episodes}\n")
+        return final

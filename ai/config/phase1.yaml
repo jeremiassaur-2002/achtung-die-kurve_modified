@@ -92,6 +92,28 @@ enable_self_play_snapshots: false
 checkpoint_every_steps: 100000
 checkpoint_keep: 1
 # one deterministic behavior video per interval, written headlessly as MP4 into
-# <run>/videos/ (on Drive when --run-root points there); 0 disables
+# <run>/videos/ (on Drive when --run-root points there); 0 disables.
+# video_seconds == max_episode_ticks/60: das Video deckt die GANZE Episode ab,
+# inkl. Tod bzw. Episoden-Limit. (Vorher 30s: beide 30.5s-Videos bei 2.5M/3M
+# waren exakt 1831 Frames = 1+1800+30 - der Agent lebte noch, nur die Aufnahme
+# war zu Ende. Die neue Endkarte im Video benennt den Ende-Grund jetzt explizit.)
 video_every_steps: 500000
-video_seconds: 30
+video_seconds: 60
+
+# bestes Modell des Laufs (zusätzlich zu den rotierenden Checkpoints, die immer
+# nur den NEUESTEN Stand halten): gleitender Mittelwert über best_window_episodes
+# Episoden; bei neuem Bestwert wird <run>/best/best_model.zip atomar ersetzt.
+# In Phase 1 ist die Überlebenszeit (ep_len_mean) die ehrlichste Metrik - der
+# Reward enthält Shaping-Terme. best_history.csv protokolliert jede Verbesserung.
+best_metric: ep_len_mean
+best_window_episodes: 100
+best_min_episodes: 50
+best_check_every_steps: 10000
+
+# Messpunkt-Dichte der metrics.csv (vorher fest 2000): 1 Zeile je 500 Schritte
+# ->  bei 3M Schritten ~6000 Messpunkte, damit die neuen "mean_"-Charts
+# (gleitendes Mittel über 1.000/10.000 Messpunkte) wirklich glätten statt fast
+# den Globalmittelwert zu zeigen. Bei --resume harmlos: alte Zeilen behalten
+# ihren 2000er-Abstand, neue kommen dichter - die Charts tragen ohnehin Schritte
+# auf der x-Achse.
+metrics_log_every_steps: 500

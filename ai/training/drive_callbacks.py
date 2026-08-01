@@ -10,9 +10,59 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from collections import deque
+
 from stable_baselines3.common.callbacks import BaseCallback
 
-from ai.training.run_persistence import record_episode_video, save_rotating_checkpoint
+from ai.training.run_persistence import BestTracker, record_episode_video, save_rotating_checkpoint
+
+
+class BestModelCallback(BaseCallback):
+    """Hält zusätzlich zu den rotierenden Checkpoints (= neuester Stand) den
+    BESTEN Stand des Laufs fest: gleitender Mittelwert über die letzten `window`
+    Episoden von `metric` ("ep_len_mean" = Überlebenszeit in Ticks, oder
+    "reward_mean"); verbessert er sich, wird best/best_model.zip atomar ersetzt
+    (Logik + Resume-Sicherheit: BestTracker in run_persistence.py). Das ist ein
+    vollwertiges model.save() - es lässt sich mit --resume fortsetzen, per
+    --init-from in die nächste Phase mitnehmen und direkt exportieren."""
+
+    def __init__(
+        self,
+        best_dir,
+        metric: str = "ep_len_mean",
+        window: int = 100,
+        min_episodes: int = 50,
+        check_every_steps: int = 10_000,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.tracker = BestTracker(best_dir, metric=metric, min_episodes=min_episodes)
+        self.metric = metric
+        self.check_every_steps = check_every_steps
+        self._values: deque[float] = deque(maxlen=window)
+        self._last_check = 0
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            if "episode_ticks" not in info:
+                continue
+            if self.metric == "reward_mean":
+                ep = info.get("episode")
+                if ep is not None:
+                    self._values.append(float(ep["r"]))
+            else:
+                self._values.append(float(info["episode_ticks"]))
+
+        if self.num_timesteps - self._last_check < self.check_every_steps:
+            return True
+        self._last_check = self.num_timesteps
+        if not self._values:
+            return True
+        mean_value = sum(self._values) / len(self._values)
+        saved = self.tracker.maybe_save(self.model, mean_value, len(self._values), self.num_timesteps)
+        if saved is not None and self.verbose:
+            print(f"[best] neuer Bestwert {self.metric}={mean_value:.1f} bei Schritt {self.num_timesteps:,} -> {saved}")
+        return True
 
 
 class RotatingCheckpointCallback(BaseCallback):

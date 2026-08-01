@@ -77,6 +77,92 @@ def entropy_curve(metrics: pd.DataFrame, out_dir: Path) -> Path:
     return _line_chart(df, "step", "entropy", "Entropy (Exploration vs. Exploitation)", "Entropy", out_dir / "entropy_curve.png", CATEGORICAL[6])
 
 
+def survival_time_curve(metrics: pd.DataFrame, out_dir: Path) -> Path:
+    """Overlebenszeit in Sekunden (ep_len_mean / 60 bei 60 Hz). ep_len_mean ist
+    bereits ein gleitender Mittelwert über die letzten 100 Episoden (siehe
+    MetricsLoggingCallback) - also die "zeitgemittelte" Überlebenszeit. In
+    Solo-Phasen (n_opponents=0) ist DAS die Fortschrittsmetrik, nicht win_rate."""
+    df = metrics.copy()
+    df["survival_s"] = df["ep_len_mean"] / 60.0
+    return _line_chart(
+        df, "step", "survival_s", "Überlebenszeit (zeitgemittelt, 100 Episoden)", "Ø Überlebenszeit (s)", out_dir / "survival_time_curve.png", CATEGORICAL[4]
+    )
+
+
+# Rolling-mean windows for the mean_*.png chart variants, counted in metrics.csv
+# ROWS (one row = one logged sample, every metrics_log_every_steps training steps -
+# the x-axis stays "Trainingsschritte"). While fewer rows exist than the window,
+# rolling(min_periods=1) degrades gracefully into the running average of
+# everything so far and converges to a true moving window as the run grows.
+MEAN_WINDOWS = (1_000, 10_000)
+
+
+def _mean_chart(df: pd.DataFrame, y: str, title: str, ylabel: str, out_path: Path, color: str) -> Path | None:
+    if y not in df or not df[y].notna().any():
+        return None
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    clean = df.dropna(subset=[y]).reset_index(drop=True)
+    fig, ax = _new_axes()
+    ax.plot(clean["step"], clean[y], color=INK_MUTED, linewidth=1, alpha=0.35, label="roh")
+    for window, series_color in zip(MEAN_WINDOWS, (color, INK_PRIMARY)):
+        rolled = clean[y].rolling(window, min_periods=1).mean()
+        ax.plot(clean["step"], rolled, color=series_color, linewidth=2, solid_capstyle="round", label=f"Ø {window:,} Messpunkte".replace(",", "."))
+    ax.legend(frameon=False, labelcolor=INK_SECONDARY, fontsize=9)
+    ax.set_title(title, color=INK_PRIMARY, fontsize=12, loc="left")
+    ax.set_xlabel("Trainingsschritte")
+    ax.set_ylabel(ylabel)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return out_path
+
+
+def mean_variants(metrics: pd.DataFrame, out_dir: Path) -> list[tuple[str, Path]]:
+    """One mean_<name>.png per Kurve des Reports: Rohserie blass im Hintergrund,
+    darüber gleitende Mittel über 1.000 und 10.000 Messpunkte."""
+    df = metrics.copy()
+    if "entropy_loss" in df:
+        df["entropy"] = -df["entropy_loss"]
+    if "win_rate" in df:
+        df["win_rate_pct"] = df["win_rate"] * 100
+    if "ep_len_mean" in df:
+        df["survival_s"] = df["ep_len_mean"] / 60.0
+
+    jobs = [
+        ("mean_reward_curve.png", "reward_mean", "Reward-Verlauf (gemittelt)", "Durchschnittlicher Reward", CATEGORICAL[0]),
+        ("mean_win_rate_curve.png", "win_rate_pct", "Siegquote (gemittelt)", "Win Rate (%)", CATEGORICAL[2]),
+        ("mean_learning_rate_curve.png", "learning_rate", "Learning Rate (gemittelt)", "Learning Rate", CATEGORICAL[3]),
+        ("mean_entropy_curve.png", "entropy", "Entropy (gemittelt)", "Entropy", CATEGORICAL[6]),
+        ("mean_survival_time_curve.png", "survival_s", "Überlebenszeit (gemittelt)", "Ø Überlebenszeit (s)", CATEGORICAL[4]),
+    ]
+    written: list[tuple[str, Path]] = []
+    for filename, column, title, ylabel, color in jobs:
+        path = _mean_chart(df, column, title, ylabel, out_dir / filename, color)
+        if path is not None:
+            written.append((title, path))
+    return written
+
+
+def death_causes_curve(dc: pd.DataFrame, out_dir: Path) -> Path | None:
+    """Anteile der Episoden-Endursachen (gleitend über die letzten 100 Episoden):
+    wall/self/doomed/... - beantwortet 'WORAN stirbt der Agent gerade?' direkt."""
+    cause_cols = [c for c in dc.columns if c != "step" and dc[c].notna().any()]
+    if dc.empty or not cause_cols:
+        return None
+    fig, ax = _new_axes()
+    for i, col in enumerate(cause_cols):
+        ax.plot(dc["step"], dc[col] * 100, color=CATEGORICAL[i % len(CATEGORICAL)], linewidth=2, solid_capstyle="round", label=col)
+    ax.legend(frameon=False, labelcolor=INK_SECONDARY, fontsize=9, ncol=2)
+    ax.set_title("Episoden-Ende: Ursachenanteile", color=INK_PRIMARY, fontsize=12, loc="left")
+    ax.set_xlabel("Trainingsschritte")
+    ax.set_ylabel("Anteil (%)")
+    fig.tight_layout()
+    out_path = out_dir / "death_causes_curve.png"
+    fig.savefig(out_path, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return out_path
+
+
 def elo_curve(league, out_dir: Path) -> Path | None:
     if league is None or not league.entries:
         return None
