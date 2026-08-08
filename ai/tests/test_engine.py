@@ -5,9 +5,9 @@ b_clear), and the border-check's "unscaled hitbox" quirk preserved from script.j
 
 import math
 
-from ai.config import game_constants as gc
-from ai.config.game_constants import GameConstants
-from ai.env.engine import STRAIGHT, TURN_LEFT, CurveEngine, ItemOnScreen
+from ai.core.config import game_constants as gc
+from ai.core.config.game_constants import GameConstants
+from ai.core.env.engine import STRAIGHT, TURN_LEFT, CurveEngine, ItemOnScreen
 
 
 def _engine(resolution=200):

@@ -16,8 +16,8 @@ import random
 import numpy as np
 from PIL import Image, ImageDraw
 
-from ai.config.game_constants import GameConstants
-from ai.env.engine import CurveEngine
+from ai.core.config.game_constants import GameConstants
+from ai.core.env.engine import CurveEngine
 
 
 def _reference_stamp(grid: np.ndarray, stamp: np.ndarray, slot: int, tick: int, xa, ya, xb, yb, width: int) -> None:

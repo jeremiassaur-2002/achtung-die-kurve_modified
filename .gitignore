@@ -17,3 +17,7 @@ ai/exported/
 /model_data.js
 ai/final_model*/
 ai/final_model*.zip
+
+# AI-Trainingsausgaben (Gewichte, Videos, TensorBoard) gehoeren nicht in die Repo-History
+ai/output/
+ai/runs/

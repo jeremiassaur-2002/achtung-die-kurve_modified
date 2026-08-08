@@ -1,0 +1,64 @@
+# Stil-Feintuning "aggressiv" - ab dem Phase-3-Modell starten:
+#   python -m ai.v1_0.training.train --config ai/v1_0/config/style_aggressive.yaml \
+#       --init-from <run-root>/phase3/final_model.zip --run-root ... --run-name style_aggressive
+# Gleiche Architektur/Observation wie Phase 3; NUR die Reward-Gewichte verschieben den
+# Stil: Kills und Naehe zum Gegner zahlen viel, reines Ueberleben fast nichts. Die
+# Taktiken selbst ("in die Wand draengen", Luecken schneiden) entstehen daraus - sie
+# werden nicht einzeln belohnt, weil ihre Erkennung unscharf und ausnutzbar waere.
+phase: 3
+description: "Style fine-tune: aggressive - hunt kills, accept risk."
+
+total_timesteps: 2000000
+n_envs: 8
+use_subprocess: true
+seed: 0
+
+engine_resolution: 256
+obs_resolution: 96
+frame_stack: 4
+max_episode_ticks: 3600
+
+use_action_masking: false
+action_mask_horizon: 3
+cnn_arch: medium
+
+ppo:
+  learning_rate: 0.0001   # fine-tune: kleiner als beim Basistraining
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+reward:
+  alive_bonus: 0.003      # Ueberleben allein zahlt kaum ...
+  death_penalty: -1.0
+  kill_bonus: 1.5         # ... Kills zahlen viel (Engine attribuiert exakt via death_cause)
+  win_bonus: 2.5
+  placement_scale: 0.1
+  clearance_weight: 0.0   # kein Abstands-Shaping - Naehe ist hier erwuenscht
+  terminate_doomed_border: true
+
+curriculum:
+  blend_window_episodes: 150
+  rolling_window: 300
+  pool_variants: 8
+  stages:
+    - name: style
+      n_opponents: 3
+      opponent_mix: ["self_play", "self_play", "rule_based:hard"]
+      items_enabled: false
+      win_rate_threshold: 1.1
+      min_episodes: 999999999
+
+enable_league: false
+enable_self_play_snapshots: true
+self_play_snapshot_every_steps: 50000
+self_play_max_snapshots: 10
+
+checkpoint_every_steps: 100000
+checkpoint_keep: 1
+video_every_steps: 500000
+video_seconds: 30

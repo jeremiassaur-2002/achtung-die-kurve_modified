@@ -1,0 +1,53 @@
+# Phase 2 - self-play: one opponent, drawn from a rotating pool of recent
+# snapshots of the model currently being trained (ai/v1_0/training/self_play.py).
+# Start from Phase 1's checkpoint via `--init-from`.
+phase: 2
+description: "Self-play - 1 opponent, recent snapshots of self."
+
+total_timesteps: 3000000
+n_envs: 8
+use_subprocess: true
+seed: 0
+
+engine_resolution: 256
+obs_resolution: 96
+frame_stack: 4
+max_episode_ticks: 3600
+
+use_action_masking: false
+action_mask_horizon: 3
+cnn_arch: small
+
+ppo:
+  learning_rate: 0.0003
+  n_steps: 512
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+reward:
+  alive_bonus: 0.01
+  death_penalty: -1.0
+  kill_bonus: 0.5
+  win_bonus: 2.0
+  placement_scale: 0.0
+
+curriculum:
+  blend_window_episodes: 50
+  rolling_window: 200
+  pool_variants: 6
+  stages:
+    - name: self_play_1v1
+      n_opponents: 1
+      opponent_mix: ["self_play"]
+      items_enabled: false
+      win_rate_threshold: 1.1
+      min_episodes: 999999999
+
+enable_league: false
+enable_self_play_snapshots: true
+self_play_snapshot_every_steps: 25000
+self_play_max_snapshots: 10

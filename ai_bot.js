@@ -1,10 +1,10 @@
 // ============================================================================
 //  ai_bot.js - runs a trained PPO policy (exported to ONNX by
-//  ai/export/export_onnx.py) as an in-browser opponent, using onnxruntime-web.
+//  ai/core/export/export_onnx.py) as an in-browser opponent, using onnxruntime-web.
 //
 //  Setup:
 //    1. Train + export a model (see ai/colab/Train_Achtung_Kurve_AI.ipynb). By
-//       default ai/export/export_onnx.py also writes a `model_data.js` sidecar
+//       default ai/core/export/export_onnx.py also writes a `model_data.js` sidecar
 //       (the .onnx bytes base64-embedded as `const AI_MODEL_BASE64 = "..."`).
 //       Copy BOTH next to index.html, and add:
 //         <script src="model_data.js" defer></script>
@@ -24,7 +24,7 @@
 //  gets `aiThink(name)` called once per simulation tick (see script.js's
 //  `if (players[player].isAI) aiThink(player)` hook), which sets turnL/turnR.
 //  The observation (RGB frame stack + metadata vector) mirrors
-//  ai/env/observation.py exactly, so any exported checkpoint drops in as-is.
+//  ai/core/env/observation.py exactly, so any exported checkpoint drops in as-is.
 //
 //  ONNX Runtime Web itself isn't bundled here (no build step in this project,
 //  same as Google Fonts being loaded via a CDN link in index.html) - it's
@@ -33,10 +33,10 @@
 
 const ORT_CDN_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"
 
-// must match ai/env/observation.py's ObsConfig defaults used for training/export
+// must match ai/core/env/observation.py's ObsConfig defaults used for training/export
 const AI_DEFAULT_OBS_RESOLUTION = 96
 const AI_DEFAULT_FRAME_STACK = 4
-const AI_MAX_PLAYERS = 6 // ai/config/game_constants.py: gc.MAX_PLAYERS
+const AI_MAX_PLAYERS = 6 // ai/core/config/game_constants.py: gc.MAX_PLAYERS
 
 const _aiState = {} // name -> { session, frames: Uint8Array[], obsResolution, frameStack, busy }
 let _ortLoadPromise = null
@@ -75,7 +75,7 @@ function _captureFrame(size) {
     return ctx.getImageData(0, 0, size, size).data // RGBA Uint8ClampedArray
 }
 
-// RGBA HWC -> RGB CHW uint8, dropping alpha - matches ai/env/renderer.to_chw()
+// RGBA HWC -> RGB CHW uint8, dropping alpha - matches ai/core/env/renderer.to_chw()
 function _rgbaToChw(rgba, size) {
     const chw = new Uint8Array(3 * size * size)
     const plane = size * size
@@ -87,7 +87,7 @@ function _rgbaToChw(rgba, size) {
     return chw
 }
 
-// matches ai/env/observation.py's _build_vector exactly - same order, same normalization
+// matches ai/core/env/observation.py's _build_vector exactly - same order, same normalization
 function _buildVector(name) {
     const p = players[name]
     const half = h / 2
@@ -146,7 +146,7 @@ async function aiThink(name) {
         let best = 0
         for (let i = 1; i < logits.length; i++) if (logits[i] > logits[best]) best = i
 
-        // action encoding matches ai/env/engine.py: 0 = turn left, 1 = straight, 2 = turn right
+        // action encoding matches ai/core/env/engine.py: 0 = turn left, 1 = straight, 2 = turn right
         p.turnL = best === 0
         p.turnR = best === 2
     } catch (err) {

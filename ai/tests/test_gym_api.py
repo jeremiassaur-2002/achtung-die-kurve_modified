@@ -5,9 +5,9 @@ rollout collection all wired together)."""
 
 import numpy as np
 
-from ai.env.curve_env import CurveEnv, CurveEnvConfig
-from ai.env.observation import ObsConfig
-from ai.env.opponents import EpisodeConfig, RandomController
+from ai.core.env.curve_env import CurveEnv, CurveEnvConfig
+from ai.core.env.observation import ObsConfig
+from ai.core.env.opponents import EpisodeConfig, RandomController
 
 
 def _simple_factory() -> EpisodeConfig:
@@ -59,8 +59,8 @@ def test_action_masking_never_masks_all_three():
 def test_short_ppo_smoke_train():
     from stable_baselines3 import PPO
 
-    from ai.env.vec_factory import build_vec_env
-    from ai.models.policy import POLICY_NAME, build_policy_kwargs
+    from ai.core.env.vec_factory import build_vec_env
+    from ai.v1_0.models.policy import POLICY_NAME, build_policy_kwargs
 
     # SmallCNN's fixed 8/4/4/2/3/1 conv strides need >= ~64px input (32px, used by
     # the other tests here for speed, is smaller than its own receptive field)

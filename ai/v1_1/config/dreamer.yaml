@@ -1,0 +1,95 @@
+# v1_1 - Dreamer (RSSM-Weltmodell) + Beam-Pfadplaner als Experte.
+#
+# Unterschiede zu v1_0/config/phase1.yaml, jeweils mit Begruendung:
+#
+#   n_rays: 36 statt 16    Der Wunsch "alle 10 Grad ein Abstand". 360/36 = 10,
+#                          und sensors._ray_units legt die Strahlen exakt auf
+#                          2*pi*k/K - Strahl 0 zeigt geradeaus, kopfrelativ.
+#                          Kosten: der Beobachtungsvektor waechst von 38 auf 58
+#                          Werte, die Strahlensuche von 16 auf 36 Zeilen im
+#                          gather. Beides vernachlaessigbar gegenueber dem Bild.
+#
+#   frame_stack: 1         Der RSSM fuehrt einen rekurrenten Zustand und baut
+#                          sich die Historie selbst. Ein 4er-Stack waere
+#                          vierfach redundante Information - und im Datensatz
+#                          vierfacher Plattenbedarf (siehe data/collect.py).
+#
+#   obs_resolution: 64     DreamerV3-Standard. Der Decoder muss das Bild
+#                          rekonstruieren; bei 96px kostet das ~2.2x mehr
+#                          Rechenzeit pro Schritt, ohne dass mehr sichtbar
+#                          waere - die relevante Nahfeldgeometrie liefern
+#                          ohnehin die 36 Strahlen, nicht das Bild.
+
+version: v1_1
+seed: 0
+
+# --------------------------------------------------------------- Simulation
+engine_resolution: 256
+obs_resolution: 64
+frame_stack: 1
+max_episode_ticks: 3600
+
+# ----------------------------------------------------------------- Sensoren
+n_rays: 36            # alle 10 Grad ein Abstand, kopfrelativ
+ray_range_px: 64.0    # ~ ein Wendekreisdurchmesser + Reserve
+arc_horizon: 45
+
+# ------------------------------------------------------------------ Gegner
+# Fuer die erste Datensammlung bewusst schwach und ohne Items: der Datensatz
+# soll zuerst "wie ueberlebe ich ueberhaupt" abdecken, nicht Item-Taktik.
+opponents:
+  - random
+  - rule_based:medium
+
+reward:
+  alive_bonus: 0.01
+  death_penalty: -1.0
+  kill_bonus: 0.5
+  win_bonus: 2.0
+
+# ------------------------------------------------------------------ Planer
+planner:
+  horizon: 60         # 1 Sekunde Vorausschau bei 60 Ticks/s
+  commit_ticks: 6     # 10 Bloecke -> Beam statt 3^60 Sequenzen
+  beam_width: 12
+  clearance_rays: 12
+  clearance_range_px: 48.0
+  clearance_weight: 0.5
+  straight_bonus: 0.05
+  epsilon: 0.05       # Streuung, damit der Datensatz auch Fehler enthaelt
+
+# --------------------------------------------------------------- Datensatz
+dataset_dir: null           # null = ai/output/v1_1/dataset
+dataset_min_ticks: 200000   # darunter sammelt entry.py automatisch nach
+collect_episodes: 100
+
+# ------------------------------------------------- Weltmodell (Patch 2)
+# Werte hier schon festgehalten, damit die Konfiguration nicht spaeter
+# nachtraeglich erfunden wird. DreamerV3-Groesse "small".
+world_model:
+  deter_dim: 512        # deterministischer GRU-Zustand h
+  stoch_dim: 32         # kategoriale Latents ...
+  stoch_classes: 32     # ... 32x32, wie DreamerV3
+  hidden_dim: 512
+  cnn_depth: 32
+  kl_free_nats: 1.0     # free bits, verhindert Posterior-Kollaps
+  kl_balance: 0.8
+  batch_size: 16
+  batch_length: 64      # Sequenzlaenge pro Batch
+  learning_rate: 1.0e-4
+  train_steps: 100000
+
+policy:
+  imagination_horizon: 15
+  gamma: 0.997
+  lambda_: 0.95
+  actor_lr: 3.0e-5
+  critic_lr: 3.0e-5
+  entropy_scale: 3.0e-4
+  train_steps: 50000
+
+# ------------------------------------------------------------ Persistenz
+checkpoint_every_steps: 5000
+checkpoint_keep: 2
+video_every_steps: 25000
+video_seconds: 60

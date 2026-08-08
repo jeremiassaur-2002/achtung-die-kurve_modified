@@ -1,4 +1,4 @@
-"""Tests for ai/env/sensors.py and its wiring into observation/curve_env:
+"""Tests for ai/core/env/sensors.py and its wiring into observation/curve_env:
 
 - rays measure the analytic border distance and detect stamped trails
 - fresh own-tail pixels are exempt for rays and arcs (engine's grace rule)
@@ -17,13 +17,13 @@ import random
 
 import numpy as np
 
-from ai.config import game_constants as gc
-from ai.config.game_constants import GameConstants
-from ai.env import sensors
-from ai.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
-from ai.env.engine import CurveEngine, STRAIGHT, TURN_LEFT, TURN_RIGHT
-from ai.env.observation import ObsConfig, ObservationBuilder, vector_dim
-from ai.env.opponents import EpisodeConfig
+from ai.core.config import game_constants as gc
+from ai.core.config.game_constants import GameConstants
+from ai.core.env import sensors
+from ai.core.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
+from ai.core.env.engine import CurveEngine, STRAIGHT, TURN_LEFT, TURN_RIGHT
+from ai.core.env.observation import ObsConfig, ObservationBuilder, vector_dim
+from ai.core.env.opponents import EpisodeConfig
 
 
 def _solo_engine(x=128.0, y=128.0, direction=0.0, seed=0) -> CurveEngine:

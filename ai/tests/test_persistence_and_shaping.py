@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from ai.config import game_constants as gc
-from ai.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
-from ai.env.observation import ObsConfig
-from ai.env.opponents import EpisodeConfig
-from ai.training.run_persistence import latest_checkpoint, record_episode_video, save_rotating_checkpoint
+from ai.core.config import game_constants as gc
+from ai.core.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
+from ai.core.env.observation import ObsConfig
+from ai.core.env.opponents import EpisodeConfig
+from ai.v1_0.training.run_persistence import latest_checkpoint, record_episode_video, save_rotating_checkpoint
 
 
 def _solo_factory() -> EpisodeConfig:

@@ -1,4 +1,4 @@
-"""Wiring tests for the algorithm factory (ai/models/algo.py), the per-algorithm
+"""Wiring tests for the algorithm factory (ai/v1_0/models/algo.py), the per-algorithm
 policy kwargs, save/load class dispatch, a tiny learn() smoke per algorithm, and
 a miniature end-to-end behavior-cloning run. Everything runs on CPU with tiny
 observation sizes - these prove the plumbing, not the learning."""
@@ -11,12 +11,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ai.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
-from ai.env.observation import ObsConfig
-from ai.env.opponents import EpisodeConfig
-from ai.env.vec_factory import build_vec_env
-from ai.models.algo import ALGO_CHOICES, build_algo_kwargs, load_trained, resolve_algo, sniff_algo_name
-from ai.models.policy import build_policy_kwargs
+from ai.core.env.curve_env import CurveEnv, CurveEnvConfig, RewardConfig
+from ai.core.env.observation import ObsConfig
+from ai.core.env.opponents import EpisodeConfig
+from ai.core.env.vec_factory import build_vec_env
+from ai.v1_0.models.algo import ALGO_CHOICES, build_algo_kwargs, load_trained, resolve_algo, sniff_algo_name
+from ai.v1_0.models.policy import build_policy_kwargs
 
 
 def _tiny_env_config() -> CurveEnvConfig:
@@ -118,7 +118,7 @@ def test_learn_smoke_and_load_dispatch(tmp_path: Path, algo: str):
 
 
 def test_frozen_policy_controller_loads_recurrent(tmp_path: Path):
-    from ai.env.opponents import FrozenPolicyController
+    from ai.core.env.opponents import FrozenPolicyController
 
     env = _tiny_vec_env()
     model = _tiny_model("recurrent_ppo", env)
@@ -141,7 +141,7 @@ def test_frozen_policy_controller_loads_recurrent(tmp_path: Path):
 
 
 def test_bc_end_to_end(tmp_path: Path, capsys):
-    from ai.training.bc_pretrain import evaluate_cloned, generate_dataset, train_bc
+    from ai.v1_0.training.bc_pretrain import evaluate_cloned, generate_dataset, train_bc
 
     cfg = {
         "phase": 1,

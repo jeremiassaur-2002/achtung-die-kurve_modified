@@ -1,8 +1,8 @@
 """Checks every derived ratio against the literal script.js formulas, so a future
 edit to game_constants.py can't silently drift from the source of truth."""
 
-from ai.config import game_constants as gc
-from ai.config.game_constants import GameConstants
+from ai.core.config import game_constants as gc
+from ai.core.config.game_constants import GameConstants
 
 
 def test_w100th_ratio_matches_4_3_aspect():

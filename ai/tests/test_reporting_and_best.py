@@ -8,11 +8,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ai.env.curve_env import CurveEnv, CurveEnvConfig
-from ai.env.observation import ObsConfig
-from ai.env.opponents import EpisodeConfig
-from ai.reporting import plots, report
-from ai.training.run_persistence import BestTracker, record_episode_video
+from ai.core.env.curve_env import CurveEnv, CurveEnvConfig
+from ai.core.env.observation import ObsConfig
+from ai.core.env.opponents import EpisodeConfig
+from ai.v1_0.reporting import plots, report
+from ai.v1_0.training.run_persistence import BestTracker, record_episode_video
 
 
 class _StubModel:
