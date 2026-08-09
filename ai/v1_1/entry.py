@@ -6,10 +6,9 @@ Die Pipeline hat drei Phasen, und `ai.run` misst jede einzeln:
   2. `world_model`  - RSSM auf diesen Trajektorien, rein offline
   3. `policy`       - Actor/Critic in der Imagination des Weltmodells
 
-**Stand.** Phase 1 laeuft. Phase 2 und 3 sind noch nicht implementiert; dieser
-Adapter bricht dort mit einer klaren Meldung ab, statt einen Platzhalter zu
-trainieren, der wie Fortschritt aussieht. Wer nur Daten sammeln will, nimmt
-direkt `python -m ai.run collect --version v1_1 ...`.
+Alle drei Phasen laufen. Wer nur Daten sammeln will, nimmt direkt
+`python -m ai.run collect --version v1_1 ...`; ein bereits trainiertes
+Weltmodell wird uebersprungen (`force_world_model: true` erzwingt neu).
 
 **Warum die Reihenfolge so und nicht Dreamer-ueblich.** DreamerV3 sammelt
 normalerweise waehrend des Trainings selbst weiter (online). Hier steht die
@@ -53,10 +52,27 @@ def train(cfg: dict, paths: RunPaths, timer: PhaseTimer, resume: str | None = "a
         rec.meta.update(stats)
         print(f"[v1_1] Datensatz: {stats['shards']} Shards, {stats['total_ticks']:,} Ticks")
 
-    raise SystemExit(
-        "[v1_1] Weltmodell und Actor/Critic sind noch nicht implementiert (Patch 2).\n"
-        f"       Der Datensatz unter {dataset_dir} ist fertig und bleibt gueltig - "
-        "Patch 2 setzt genau dort auf.\n"
-        "       Bis dahin nutzbar: 'ai.run collect' (Daten), der Planer als Gegner, "
-        "und v1_0 fuer vollstaendiges Training."
+    from ai.v1_1.training.train_world_model import train_world_model
+
+    # Ein fertiges Weltmodell wird nicht neu trainiert. Die Policy-Phase ist die,
+    # die man haeufig wiederholt (andere Entropie, anderer Horizont); das
+    # Weltmodell jedes Mal mitzuschleifen waere die teuerste Art, nichts zu tun.
+    world_model_path = paths.best / "world_model.pt"
+    if world_model_path.exists() and not cfg.get("force_world_model", False):
+        print(f"[v1_1] Weltmodell vorhanden, ueberspringe Phase 2: {world_model_path}")
+        timer.mark("world_model_skipped", 0.0, path=str(world_model_path))
+    else:
+        world_model_path = train_world_model(cfg, paths, timer, dataset_dir, resume=resume)
+
+    from ai.v1_1.training.train_policy import train_policy
+
+    policy_path = train_policy(cfg, paths, timer, dataset_dir, world_model_path, resume=resume)
+
+    print(
+        "\n[v1_1] Pipeline vollstaendig.\n"
+        f"       Weltmodell: {world_model_path}\n"
+        f"       Policy:     {policy_path}\n"
+        "       Jetzt gegen die Referenzen messen:\n"
+        f"         python -m ai.v1_1.evaluate --run {paths.root} --episodes 20"
     )
+    return policy_path

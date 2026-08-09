@@ -58,6 +58,24 @@ planner:
   straight_bonus: 0.05
   epsilon: 0.05       # Streuung, damit der Datensatz auch Fehler enthaelt
 
+# Gemischte Experten-Qualitaeten. Ein einheitlich starker Planer stirbt fast nie
+# (<0,3% Todesschritte) - dann lernt der Fortsetzungskopf nur "es geht immer
+# weiter" und der Actor hat in der Imagination nichts zu vermeiden. Die
+# schwachen Varianten liefern die Aufpralle, die starke das gute Verhalten.
+planner_mix:
+  - weight: 0.5           # stark: Vorbild fuer die Verhaltensklonung
+    horizon: 60
+    beam_width: 12
+    epsilon: 0.05
+  - weight: 0.3           # mittel
+    horizon: 30
+    beam_width: 6
+    epsilon: 0.15
+  - weight: 0.2           # schwach: stirbt oft, liefert Todesdaten
+    horizon: 15
+    beam_width: 3
+    epsilon: 0.30
+
 # --------------------------------------------------------------- Datensatz
 dataset_dir: null           # null = ai/output/v1_1/dataset
 dataset_min_ticks: 200000   # darunter sammelt entry.py automatisch nach
@@ -73,20 +91,46 @@ world_model:
   hidden_dim: 512
   cnn_depth: 32
   kl_free_nats: 1.0     # free bits, verhindert Posterior-Kollaps
-  kl_balance: 0.8
   batch_size: 16
   batch_length: 64      # Sequenzlaenge pro Batch
+  continue_pos_weight: 50.0  # Terminals sind <0,3% der Schritte
+  terminal_fraction: 0.25    # Anteil der Batch-Sequenzen mit garantiertem Tod
+  ttd_cap: 120.0             # Restlebensdauer wird hier gedeckelt
+  survival_weight: 1.0
+  val_fraction: 0.1          # Split ueber ganze Episoden
+  kl_beta_dyn: 0.5      # zieht den Prior zum Posterior (der erwuenschte Weg)
+  kl_beta_rep: 0.1      # nur schwach umgekehrt - sonst Posterior-Kollaps
   learning_rate: 1.0e-4
   train_steps: 100000
+  grad_clip: 1000.0
+  log_every_steps: 200
+  dream_every_steps: 2000
+  dream_horizon: 32     # so weit wird in der Diagnose blind getraeumt
+  cache_episodes: 64    # LRU ueber entpackte Episoden (RAM gegen Ladezeit)
 
 policy:
-  imagination_horizon: 15
-  gamma: 0.997
+  imagination_horizon: 15   # 15 getraeumte Ticks pro Startzustand
+  gamma: 0.997              # ~330 Ticks Halbwertszeit - passt zu Episoden von 1000+
   lambda_: 0.95
   actor_lr: 3.0e-5
   critic_lr: 3.0e-5
-  entropy_scale: 3.0e-4
+  entropy_scale: 3.0e-4     # hoeher = laenger unentschlossen, niedriger = frueh festgefahren
+  slow_critic_decay: 0.98   # EMA-Ziel bricht die Rueckkopplung des Critics auf sich selbst
+  hidden_dim: 512
+  batch_size: 16
+  batch_length: 16
   train_steps: 50000
+  log_every_steps: 200
+  # Verhaltensklonung auf die Planer-Aktionen VOR der Imagination. Ohne das
+  # startet der Actor gleichverteilt, stirbt sofort und lernt aus lauter kurzen,
+  # gleich schlechten Traeumen fast nichts.
+  bc_steps: 500
+  bc_lr: 3.0e-4
+  # KL-Anker zur BC-Policy gegen Abdriften in Weltmodell-Luecken. 0 = aus.
+  bc_kl_scale: 0.1
+
+# true erzwingt Neutraining des Weltmodells, auch wenn best/world_model.pt existiert
+force_world_model: false
 
 # ------------------------------------------------------------ Persistenz
 checkpoint_every_steps: 5000

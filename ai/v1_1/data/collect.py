@@ -26,6 +26,16 @@ parallelisierbar sein muss (der Planer schafft ~170 Ticks/s auf einem Kern -
 mit `--workers 8` wird daraus eine brauchbare Rate) und ein Abbruch mittendrin
 nur die letzte Episode kostet.
 
+**Warum gemischte Experten-Qualitaeten (`planner_mix`).** Ein einheitlich starker
+Planer ueberlebt tausende Ticks und stirbt fast nie - der Datensatz enthaelt dann
+unter 0,3% Todesschritte, und der Fortsetzungskopf des Weltmodells lernt schlicht
+"es geht immer weiter". Der Actor haette in der Imagination nichts zu vermeiden.
+Deshalb wird ein Teil der Episoden mit bewusst schwaecheren Einstellungen
+gesammelt (kurzer Horizont, schmaler Beam, mehr Rauschen): die sterben oft und
+liefern genau die Aufpralle, aus denen das Modell die Konsequenz eines Fehlers
+lernt. Die starken Episoden liefern weiterhin das gute Verhalten fuer die
+Verhaltensklonung. Beides wird gebraucht.
+
 **Warum Epsilon-Rauschen im Experten.** Ein rein deterministischer Planer stirbt
 fast nie und faehrt sehr aehnliche Bahnen. Ein Weltmodell, das daraus lernt,
 sieht nie einen Aufprall und kann die Konsequenz eines Fehlers nicht vorhersagen
@@ -124,16 +134,26 @@ def collect(config_path: str | Path, out_dir: str | Path, episodes: int, seed: i
         max_episode_ticks=cfg.get("max_episode_ticks", 3600),
         reward=RewardConfig(**cfg.get("reward", {})),
     )
-    pcfg = PlannerConfig(**cfg.get("planner", {}))
+    base_planner = cfg.get("planner", {})
+    # planner_mix: Liste von {weight, ...Overrides}. Leer = nur die Basiseinstellung.
+    mix = cfg.get("planner_mix") or [{"weight": 1.0}]
+    variants = []
+    for entry in mix:
+        entry = dict(entry)
+        weight = float(entry.pop("weight", 1.0))
+        variants.append((weight, PlannerConfig(**{**base_planner, **entry})))
+    pcfg = variants[0][1]
     rng = random.Random(seed + 1000 * worker_id)
     env = CurveEnv(_episode_factory(obs_cfg, cfg.get("opponents", ["random"]), rng), config=env_config, seed=seed)
-    planner = BeamPlanner(pcfg, rng)
+    planners = [(w, BeamPlanner(c, rng)) for w, c in variants]
+    weights = [w for w, _ in planners]
 
     timer = PhaseTimer(out / "timing", run_label=f"collect_w{worker_id}")
     lengths, total_ticks = [], 0
     with timer.phase("collect", episodes=episodes, worker=worker_id):
         for ep in range(episodes):
             ep_seed = seed + 10_000 * worker_id + ep
+            planner = rng.choices([p for _, p in planners], weights=weights, k=1)[0]
             with timer.section("episode"):
                 data = collect_episode(env, planner, ep_seed)
             lengths.append(int(len(data["actions"])))
@@ -149,6 +169,8 @@ def collect(config_path: str | Path, out_dir: str | Path, episodes: int, seed: i
         "mean_episode_ticks": float(np.mean(lengths)) if lengths else 0.0,
         "obs": asdict(obs_cfg),
         "planner": asdict(pcfg),
+        "planner_mix": [{"weight": w, **asdict(p.cfg)} for w, p in planners],
+        "fatal_episodes": int(sum(1 for L in lengths if L < env_config.max_episode_ticks)),
         "created": time.time(),
     }
     (out / f"index_w{worker_id}.json").write_text(json.dumps(index, indent=2))
