@@ -1,0 +1,114 @@
+# Kurztest-Kopie von dreamer.yaml: gleiche Architektur und Datensatz, nur die
+# Schrittzahlen radikal verkleinert. Zweck: in wenigen Minuten auf der CPU
+# pruefen, dass Weltmodell- und Policy-Phase durchlaufen, der Loss sinkt und
+# die Traum-Diagnose plausibel aussieht - bevor Zeit in einen langen Lauf
+# (train_steps: 100000 / 50000, siehe dreamer.yaml) investiert wird.
+# NICHT fuer ein brauchbares Modell gedacht, nur fuer den Rauchtest.
+
+version: v1_1
+seed: 0
+
+# --------------------------------------------------------------- Simulation
+engine_resolution: 256
+obs_resolution: 64
+frame_stack: 1
+max_episode_ticks: 3600
+
+# ----------------------------------------------------------------- Sensoren
+n_rays: 36
+ray_range_px: 64.0
+arc_horizon: 45
+
+# ------------------------------------------------------------------ Gegner
+opponents:
+  - random
+  - rule_based:medium
+
+reward:
+  alive_bonus: 0.01
+  death_penalty: -1.0
+  kill_bonus: 0.5
+  win_bonus: 2.0
+
+# ------------------------------------------------------------------ Planer
+planner:
+  horizon: 60
+  commit_ticks: 6
+  beam_width: 12
+  clearance_rays: 12
+  clearance_range_px: 48.0
+  clearance_weight: 0.5
+  straight_bonus: 0.05
+  epsilon: 0.05
+
+planner_mix:
+  - weight: 0.5
+    horizon: 60
+    beam_width: 12
+    epsilon: 0.05
+  - weight: 0.3
+    horizon: 30
+    beam_width: 6
+    epsilon: 0.15
+  - weight: 0.2
+    horizon: 15
+    beam_width: 3
+    epsilon: 0.30
+
+# --------------------------------------------------------------- Datensatz
+# Bewusst dasselbe Verzeichnis wie dreamer.yaml - der bereits gesammelte
+# Datensatz (1800 Episoden, ~1.11M Ticks) wird wiederverwendet, nicht neu
+# gesammelt.
+dataset_dir: null
+dataset_min_ticks: 200000
+collect_episodes: 100
+
+# ------------------------------------------------- Weltmodell (Rauchtest)
+world_model:
+  deter_dim: 512
+  stoch_dim: 32
+  stoch_classes: 32
+  hidden_dim: 512
+  cnn_depth: 32
+  kl_free_nats: 1.0
+  batch_size: 16
+  batch_length: 64
+  continue_pos_weight: 50.0
+  terminal_fraction: 0.25
+  ttd_cap: 120.0
+  survival_weight: 1.0
+  val_fraction: 0.1
+  kl_beta_dyn: 0.5
+  kl_beta_rep: 0.1
+  learning_rate: 1.0e-4
+  train_steps: 300          # Rauchtest: statt 100000
+  grad_clip: 1000.0
+  log_every_steps: 25       # Rauchtest: statt 200
+  dream_every_steps: 150    # Rauchtest: statt 2000 - zwei Diagnosen im Lauf
+  dream_horizon: 32
+  cache_episodes: 64
+
+policy:
+  imagination_horizon: 15
+  gamma: 0.997
+  lambda_: 0.95
+  actor_lr: 3.0e-5
+  critic_lr: 3.0e-5
+  entropy_scale: 3.0e-4
+  slow_critic_decay: 0.98
+  hidden_dim: 512
+  batch_size: 16
+  batch_length: 16
+  train_steps: 300          # Rauchtest: statt 50000
+  log_every_steps: 25       # Rauchtest: statt 200
+  bc_steps: 100              # Rauchtest: statt 500
+  bc_lr: 3.0e-4
+  bc_kl_scale: 0.1
+
+force_world_model: false
+
+# ------------------------------------------------------------ Persistenz
+checkpoint_every_steps: 5000
+checkpoint_keep: 2
+video_every_steps: 25000
+video_seconds: 60
